@@ -1,0 +1,10 @@
+[
+  {
+    "id": "user-1788980506988-fn3pgw",
+    "username": "Lol",
+    "email": "gamershifin75@gmail.com",
+    "passwordHash": "d4fcf64c382a7faa18e529eab189cf2a82b11d192aef718fcd98fb8636b1c4dc0d8f74f6f13ee50092264bda2f77875257b218d2a70a43d5227c8507ed46b029",
+    "salt": "f86cf0ceff8871ed22896296a4495910",
+    "createdAt": 1788980506988
+  }
+]

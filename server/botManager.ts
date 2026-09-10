@@ -1,0 +1,639 @@
+import fs from 'fs';
+import path from 'path';
+import { EventEmitter } from 'events';
+import { BotConfig, BotState, GlobalStats, PublicPlatformStats } from '../src/types.js';
+import { BotInstance } from './botInstance.js';
+
+const CONFIG_FILE = path.join(process.cwd(), 'bot-configs.json');
+const SETTINGS_FILE = path.join(process.cwd(), 'system-settings.json');
+
+export interface SystemSettings {
+  globalBotLimit: number;
+}
+
+export class BotManager extends EventEmitter {
+  private bots: Map<string, BotInstance> = new Map(); // botId -> BotInstance
+  private sseClients: Map<string, Set<(data: any) => void>> = new Map(); // userId -> Set of callbacks
+  private publicSseClients: Set<(data: any) => void> = new Set();
+  private systemSettings: SystemSettings = { globalBotLimit: 1 };
+  private healthCheckTimer: NodeJS.Timeout | null = null;
+
+  constructor() {
+    super();
+    this.loadSettings();
+    this.loadSavedConfigs();
+    this.startHealthCheckLoop();
+  }
+
+  private startHealthCheckLoop() {
+    if (this.healthCheckTimer) clearInterval(this.healthCheckTimer);
+    // Keep server warm and verify 24/7 bots are healthy
+    this.healthCheckTimer = setInterval(() => {
+      this.performHealthCheck();
+    }, 25000);
+  }
+
+  private performHealthCheck() {
+    try {
+      for (const bot of this.bots.values()) {
+        if (bot.config.shouldRun && (bot.status === 'stopped' || bot.status === 'error')) {
+          console.log(`[AUTO-HEALING] Bot "${bot.config.name}" was marked active but was stopped. Re-initiating connection...`);
+          bot.start();
+        }
+      }
+    } catch (err) {
+      console.error('[HEALTH-CHECK ERROR]:', err);
+    }
+  }
+
+  private loadSettings() {
+    const filesToTry = [SETTINGS_FILE, `${SETTINGS_FILE}.backup`];
+    for (const file of filesToTry) {
+      if (fs.existsSync(file)) {
+        try {
+          const raw = fs.readFileSync(file, 'utf-8');
+          const data = JSON.parse(raw);
+          if (typeof data.globalBotLimit === 'number' && data.globalBotLimit >= 1) {
+            this.systemSettings.globalBotLimit = data.globalBotLimit;
+            return;
+          }
+        } catch (err) {
+          console.error(`Failed to load ${file}:`, err);
+        }
+      }
+    }
+  }
+
+  private saveSettings() {
+    try {
+      const data = JSON.stringify(this.systemSettings, null, 2);
+      const tmpFile = `${SETTINGS_FILE}.tmp`;
+      fs.writeFileSync(tmpFile, data, 'utf-8');
+      fs.renameSync(tmpFile, SETTINGS_FILE);
+      try {
+        fs.writeFileSync(`${SETTINGS_FILE}.backup`, data, 'utf-8');
+      } catch {}
+    } catch (err) {
+      console.error('Failed to save system-settings.json:', err);
+    }
+  }
+
+  public getGlobalBotLimit(): number {
+    return this.systemSettings.globalBotLimit || 1;
+  }
+
+  public setGlobalBotLimit(limit: number): number {
+    const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+    this.systemSettings.globalBotLimit = safeLimit;
+    this.saveSettings();
+
+    // Enforce active bot limits across all users and broadcast
+    const botsByUser = new Map<string, BotInstance[]>();
+    for (const bot of this.bots.values()) {
+      if (!bot.config.userId) continue;
+      if (!botsByUser.has(bot.config.userId)) {
+        botsByUser.set(bot.config.userId, []);
+      }
+      botsByUser.get(bot.config.userId)!.push(bot);
+    }
+
+    for (const [userId, userBots] of botsByUser.entries()) {
+      const activeBots = userBots.filter(
+        b => b.status === 'online' || b.status === 'reconnecting' || b.status === 'starting'
+      );
+      if (activeBots.length > safeLimit) {
+        // Stop excess bots
+        const excess = activeBots.slice(safeLimit);
+        for (const excessBot of excess) {
+          excessBot.config.shouldRun = false;
+          excessBot.stop();
+        }
+        this.saveConfigs();
+      }
+      // Broadcast settings and stats updates
+      this.broadcastUser(userId, 'settings_update', { globalBotLimit: safeLimit });
+      this.broadcastUser(userId, 'stats', this.getUserStats(userId));
+    }
+
+    return safeLimit;
+  }
+
+  private loadSavedConfigs() {
+    let configs: BotConfig[] = [];
+    const filesToTry = [CONFIG_FILE, `${CONFIG_FILE}.backup`];
+    for (const file of filesToTry) {
+      if (fs.existsSync(file)) {
+        try {
+          const raw = fs.readFileSync(file, 'utf-8');
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            configs = parsed;
+            break;
+          }
+        } catch (err) {
+          console.error(`Failed to load ${file}:`, err);
+        }
+      }
+    }
+
+    for (const conf of configs) {
+      this.registerBot(conf);
+    }
+
+    // Auto-resume bots that were active before server or container restart
+    setTimeout(() => {
+      for (const bot of this.bots.values()) {
+        if (bot.config.shouldRun && bot.status === 'stopped') {
+          console.log(`[BOOT AUTO-RESUME] Resuming 24/7 bot "${bot.config.name}" for user ${bot.config.userId}...`);
+          bot.start();
+        }
+      }
+    }, 2000);
+  }
+
+  private saveConfigs() {
+    try {
+      const configs = Array.from(this.bots.values()).map(b => b.config);
+      const data = JSON.stringify(configs, null, 2);
+      const tmpFile = `${CONFIG_FILE}.tmp`;
+      fs.writeFileSync(tmpFile, data, 'utf-8');
+      fs.renameSync(tmpFile, CONFIG_FILE);
+      try {
+        fs.writeFileSync(`${CONFIG_FILE}.backup`, data, 'utf-8');
+      } catch {}
+    } catch (err) {
+      console.error('Failed to save configs:', err);
+    }
+  }
+
+  private registerBot(config: BotConfig): BotInstance {
+    const instance = new BotInstance(config);
+
+    instance.on('update', (state: BotState) => {
+      if (config.userId) {
+        this.broadcastUser(config.userId, 'bot_update', state);
+        this.broadcastUser(config.userId, 'stats', this.getUserStats(config.userId));
+      }
+      this.broadcastPublicStats();
+    });
+
+    instance.on('chat', (log: any) => {
+      if (config.userId) {
+        this.broadcastUser(config.userId, 'chat_message', { botId: config.id, message: log });
+      }
+    });
+
+    this.bots.set(config.id, instance);
+    return instance;
+  }
+
+  public getUserBots(userId: string, deviceId?: string, clientIp?: string, isAdmin?: boolean): BotState[] {
+    const userBots = Array.from(this.bots.values())
+      .filter(b => b.config.userId === userId)
+      .map(b => b.getState());
+
+    if (userBots.length > 0) {
+      const bot = this.bots.get(userBots[0].id);
+      if (bot) {
+        let changed = false;
+        if (deviceId && !bot.config.deviceId) {
+          bot.config.deviceId = deviceId;
+          changed = true;
+        }
+        if (clientIp && !bot.config.clientIp) {
+          bot.config.clientIp = clientIp;
+          changed = true;
+        }
+        if (changed) this.saveConfigs();
+      }
+      return userBots;
+    }
+
+    // New user profile creation
+    const initialBot = this.createBot(userId, deviceId, clientIp, {
+      name: 'NinimoBot',
+      host: 'play.hypixel.net',
+      port: 25565,
+      username: 'NinimoBot',
+      auth: 'offline',
+      version: '',
+      autoReconnect: true,
+      reconnectDelaySeconds: 5,
+      onJoinCommand: '',
+      onJoinDelayMs: 2000,
+      antiAfk: {
+        enabled: true,
+        intervalSeconds: 30,
+        movementType: 'strafe_lr',
+        strafeDurationMs: 400,
+        swingArm: true,
+        sneakWiggle: true,
+      },
+      shouldRun: false,
+    }, isAdmin);
+    return [initialBot];
+  }
+
+  public syncUserBots(
+    userId: string,
+    clientBots: BotConfig[],
+    deviceId?: string,
+    clientIp?: string
+  ): BotState[] {
+    if (!Array.isArray(clientBots) || clientBots.length === 0) {
+      return this.getUserBots(userId, deviceId, clientIp);
+    }
+
+    for (const rawBot of clientBots) {
+      if (!rawBot || !rawBot.id) continue;
+      const existing = this.getUserBot(userId, rawBot.id);
+      if (existing) {
+        existing.updateConfig({
+          name: rawBot.name || existing.config.name,
+          host: rawBot.host || existing.config.host,
+          port: rawBot.port || existing.config.port,
+          username: rawBot.username || existing.config.username,
+          auth: rawBot.auth || existing.config.auth,
+          password: rawBot.password !== undefined ? rawBot.password : existing.config.password,
+          version: rawBot.version !== undefined ? rawBot.version : existing.config.version,
+          autoReconnect: rawBot.autoReconnect !== undefined ? rawBot.autoReconnect : existing.config.autoReconnect,
+          reconnectDelaySeconds: rawBot.reconnectDelaySeconds || existing.config.reconnectDelaySeconds,
+          onJoinCommand: rawBot.onJoinCommand !== undefined ? rawBot.onJoinCommand : existing.config.onJoinCommand,
+          onJoinDelayMs: rawBot.onJoinDelayMs || existing.config.onJoinDelayMs,
+          antiAfk: rawBot.antiAfk || existing.config.antiAfk,
+          shouldRun: rawBot.shouldRun !== undefined ? rawBot.shouldRun : existing.config.shouldRun,
+        });
+      } else {
+        // Register missing bot from client backup
+        const newConfig: BotConfig = {
+          ...rawBot,
+          userId,
+          deviceId: deviceId || rawBot.deviceId,
+          clientIp: clientIp || rawBot.clientIp,
+          name: rawBot.name || 'NinimoBot',
+          host: rawBot.host || 'play.hypixel.net',
+          port: Number(rawBot.port) || 25565,
+          username: rawBot.username || 'NinimoBot',
+          auth: rawBot.auth || 'offline',
+          autoReconnect: rawBot.autoReconnect !== undefined ? rawBot.autoReconnect : true,
+          reconnectDelaySeconds: rawBot.reconnectDelaySeconds || 5,
+          onJoinCommand: rawBot.onJoinCommand || '',
+          onJoinDelayMs: rawBot.onJoinDelayMs || 2000,
+          antiAfk: rawBot.antiAfk || {
+            enabled: true,
+            intervalSeconds: 30,
+            movementType: 'strafe_lr',
+            strafeDurationMs: 400,
+            swingArm: true,
+            sneakWiggle: true,
+          },
+          shouldRun: rawBot.shouldRun || false,
+        };
+        const newInstance = this.registerBot(newConfig);
+        if (newConfig.shouldRun) {
+          newInstance.start();
+        }
+      }
+    }
+
+    this.saveConfigs();
+    return this.getUserBots(userId, deviceId, clientIp);
+  }
+
+  public getUserBot(userId: string, botId: string): BotInstance | undefined {
+    const bot = this.bots.get(botId);
+    if (!bot || bot.config.userId !== userId) {
+      return undefined;
+    }
+    return bot;
+  }
+
+  public createBot(
+    userId: string,
+    deviceId?: string,
+    clientIp?: string,
+    data?: Partial<BotConfig>,
+    isAdmin?: boolean
+  ): BotState {
+    const limit = this.getGlobalBotLimit();
+
+    if (!isAdmin) {
+      // 1. Bot Limit per User Account
+      const existingUserBots = Array.from(this.bots.values()).filter(b => b.config.userId === userId);
+      if (existingUserBots.length >= limit) {
+        throw new Error(`Limit reached: Current limit is ${limit} bot${limit > 1 ? 's' : ''} per account. Edit or delete your existing bot.`);
+      }
+
+      // 2. Bot Limit per Browser/Device Fingerprint
+      if (deviceId) {
+        const existingDeviceBots = Array.from(this.bots.values()).filter(b => b.config.deviceId === deviceId);
+        if (existingDeviceBots.length >= limit) {
+          throw new Error(`Device limit reached: Only ${limit} bot${limit > 1 ? 's' : ''} allowed per browser/device.`);
+        }
+      }
+
+      // 3. Bot Limit per Network IP
+      if (clientIp && clientIp !== 'unknown' && !clientIp.startsWith('127.') && clientIp !== '::1') {
+        const existingIpBots = Array.from(this.bots.values()).filter(b => b.config.clientIp === clientIp);
+        if (existingIpBots.length >= limit) {
+          throw new Error(`Network limit reached: Only ${limit} bot${limit > 1 ? 's' : ''} allowed per network connection.`);
+        }
+      }
+    }
+
+    const payload = data || {};
+    const id = `bot-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const newConfig: BotConfig = {
+      id,
+      userId,
+      deviceId,
+      clientIp,
+      name: payload.name || 'NinimoBot',
+      host: payload.host || 'play.hypixel.net',
+      port: Number(payload.port) || 25565,
+      username: payload.username || 'NinimoBot',
+      auth: payload.auth || 'offline',
+      password: payload.password || '',
+      version: payload.version || '',
+      autoReconnect: payload.autoReconnect !== undefined ? payload.autoReconnect : true,
+      reconnectDelaySeconds: payload.reconnectDelaySeconds || 5,
+      onJoinCommand: payload.onJoinCommand || '',
+      onJoinDelayMs: payload.onJoinDelayMs || 2000,
+      antiAfk: {
+        enabled: payload.antiAfk?.enabled !== undefined ? payload.antiAfk.enabled : true,
+        intervalSeconds: payload.antiAfk?.intervalSeconds || 30,
+        movementType: payload.antiAfk?.movementType || 'strafe_lr',
+        strafeDurationMs: payload.antiAfk?.strafeDurationMs || 400,
+        swingArm: payload.antiAfk?.swingArm !== undefined ? payload.antiAfk.swingArm : true,
+        sneakWiggle: payload.antiAfk?.sneakWiggle !== undefined ? payload.antiAfk.sneakWiggle : true,
+      },
+    };
+
+    const bot = this.registerBot(newConfig);
+    this.saveConfigs();
+    this.broadcastUser(userId, 'bot_created', bot.getState());
+    this.broadcastUser(userId, 'stats', this.getUserStats(userId));
+    this.broadcastPublicStats();
+    return bot.getState();
+  }
+
+  public updateBot(userId: string, botId: string, updates: Partial<BotConfig>): BotState | null {
+    const bot = this.getUserBot(userId, botId);
+    if (!bot) return null;
+
+    const safeUpdates = { ...updates };
+    delete (safeUpdates as any).userId;
+    delete (safeUpdates as any).id;
+
+    bot.updateConfig(safeUpdates);
+    this.saveConfigs();
+    this.broadcastUser(userId, 'bot_update', bot.getState());
+    this.broadcastPublicStats();
+    return bot.getState();
+  }
+
+  public deleteBot(userId: string, botId: string): boolean {
+    const bot = this.getUserBot(userId, botId);
+    if (!bot) return false;
+
+    bot.stop();
+    this.bots.delete(botId);
+    this.saveConfigs();
+    this.broadcastUser(userId, 'bot_deleted', { id: botId });
+    this.broadcastUser(userId, 'stats', this.getUserStats(userId));
+    this.broadcastPublicStats();
+    return true;
+  }
+
+  public startBot(
+    userId: string,
+    botId: string,
+    clientIp?: string,
+    deviceId?: string,
+    isAdmin?: boolean
+  ): boolean {
+    const bot = this.getUserBot(userId, botId);
+    if (!bot) return false;
+
+    if (clientIp) bot.config.clientIp = clientIp;
+    if (deviceId) bot.config.deviceId = deviceId;
+    this.saveConfigs();
+
+    if (!isAdmin) {
+      const limit = this.getGlobalBotLimit();
+
+      // 1. Check account active concurrency
+      const activeUserBots = Array.from(this.bots.values()).filter(
+        b => b.config.userId === userId && b.config.id !== botId && (b.status === 'online' || b.status === 'reconnecting' || b.status === 'starting')
+      );
+      if (activeUserBots.length >= limit) {
+        throw new Error(`Active bot limit reached (${limit} max active bot${limit > 1 ? 's' : ''}). Please stop your running bot before activating this one.`);
+      }
+
+      // 2. Check Device active concurrency (blocks different accounts on same browser/device)
+      const targetDeviceId = deviceId || bot.config.deviceId;
+      if (targetDeviceId) {
+        const activeDeviceBots = Array.from(this.bots.values()).filter(
+          b => b.config.deviceId === targetDeviceId && b.config.id !== botId && (b.status === 'online' || b.status === 'reconnecting' || b.status === 'starting')
+        );
+        if (activeDeviceBots.length >= limit) {
+          throw new Error(`Device protection: An active bot is already running from this device (${limit} max). Stop it before starting another.`);
+        }
+      }
+
+      // 3. Check Network IP active concurrency (blocks different accounts/incognito on same IP network)
+      const targetIp = clientIp || bot.config.clientIp;
+      if (targetIp && targetIp !== 'unknown' && !targetIp.startsWith('127.') && targetIp !== '::1') {
+        const activeIpBots = Array.from(this.bots.values()).filter(
+          b => b.config.clientIp === targetIp && b.config.id !== botId && (b.status === 'online' || b.status === 'reconnecting' || b.status === 'starting')
+        );
+        if (activeIpBots.length >= limit) {
+          throw new Error(`Network protection: An active bot is already running on this network/IP (${limit} max). Bypassing limits across multiple accounts is not permitted.`);
+        }
+      }
+    }
+
+    bot.config.shouldRun = true;
+    bot.config.lastStartedAt = Date.now();
+    this.saveConfigs();
+
+    bot.start();
+    this.broadcastPublicStats();
+    return true;
+  }
+
+  public stopBot(userId: string, botId: string): boolean {
+    const bot = this.getUserBot(userId, botId);
+    if (!bot) return false;
+    bot.config.shouldRun = false;
+    this.saveConfigs();
+    bot.stop();
+    this.broadcastPublicStats();
+    return true;
+  }
+
+  public restartBot(userId: string, botId: string): boolean {
+    const bot = this.getUserBot(userId, botId);
+    if (!bot) return false;
+    bot.restart();
+    return true;
+  }
+
+  public sendChat(userId: string, botId: string, message: string): boolean {
+    const bot = this.getUserBot(userId, botId);
+    if (!bot) return false;
+    return bot.sendChat(message);
+  }
+
+  public getUserStats(userId: string): GlobalStats {
+    let totalBots = 0;
+    let activeBots = 0;
+    let reconnectingBots = 0;
+    let stoppedBots = 0;
+    let totalUptimeSeconds = 0;
+
+    for (const bot of this.bots.values()) {
+      if (bot.config.userId === userId) {
+        totalBots++;
+        if (bot.status === 'online') {
+          activeBots++;
+          if (bot.onlineSince) {
+            totalUptimeSeconds += Math.floor((Date.now() - bot.onlineSince) / 1000);
+          }
+        } else if (bot.status === 'reconnecting' || bot.status === 'starting') {
+          reconnectingBots++;
+        } else {
+          stoppedBots++;
+        }
+      }
+    }
+
+    return {
+      totalBots,
+      activeBots,
+      reconnectingBots,
+      stoppedBots,
+      totalUptimeSeconds,
+    };
+  }
+
+  // Admin Fleet and Bot Control
+  public getAllBotsAdmin(): {
+    bot: BotState;
+    userId?: string;
+  }[] {
+    return Array.from(this.bots.values()).map((b) => ({
+      bot: b.getState(),
+      userId: b.config.userId,
+    }));
+  }
+
+  public getBotsByUserId(userId: string): BotState[] {
+    return Array.from(this.bots.values())
+      .filter((b) => b.config.userId === userId)
+      .map((b) => b.getState());
+  }
+
+  public adminStartBot(botId: string): boolean {
+    const bot = this.bots.get(botId);
+    if (!bot) return false;
+    bot.start();
+    if (bot.config.userId) {
+      this.broadcastUser(bot.config.userId, 'bot_update', bot.getState());
+    }
+    return true;
+  }
+
+  public adminStopBot(botId: string): boolean {
+    const bot = this.bots.get(botId);
+    if (!bot) return false;
+    bot.stop();
+    if (bot.config.userId) {
+      this.broadcastUser(bot.config.userId, 'bot_update', bot.getState());
+    }
+    return true;
+  }
+
+  public adminDeleteBot(botId: string): boolean {
+    const bot = this.bots.get(botId);
+    if (!bot) return false;
+    bot.stop();
+    this.bots.delete(botId);
+    this.saveConfigs();
+    if (bot.config.userId) {
+      this.broadcastUser(bot.config.userId, 'bot_deleted', { id: botId });
+      this.broadcastUser(bot.config.userId, 'stats', this.getUserStats(bot.config.userId));
+    }
+    return true;
+  }
+
+  // SSE per-user subscription
+  public addSseClient(userId: string, cb: (data: any) => void) {
+    if (!this.sseClients.has(userId)) {
+      this.sseClients.set(userId, new Set());
+    }
+    this.sseClients.get(userId)!.add(cb);
+  }
+
+  public removeSseClient(userId: string, cb: (data: any) => void) {
+    const set = this.sseClients.get(userId);
+    if (set) {
+      set.delete(cb);
+      if (set.size === 0) {
+        this.sseClients.delete(userId);
+      }
+    }
+  }
+
+  private broadcastUser(userId: string, event: string, payload: any) {
+    const set = this.sseClients.get(userId);
+    if (!set) return;
+
+    const msg = { event, data: payload, timestamp: Date.now() };
+    for (const client of set) {
+      try {
+        client(msg);
+      } catch {
+        set.delete(client);
+      }
+    }
+  }
+
+  // Public Platform Metrics & Real-time Live Counters
+  public getPlatformPublicStats(): PublicPlatformStats {
+    let activeBotsOnline = 0;
+
+    for (const bot of this.bots.values()) {
+      if (bot.status === 'online' || bot.status === 'reconnecting' || bot.status === 'starting') {
+        activeBotsOnline++;
+      }
+    }
+
+    return {
+      activeBotsOnline,
+    };
+  }
+
+  public addPublicSseClient(cb: (data: any) => void) {
+    this.publicSseClients.add(cb);
+  }
+
+  public removePublicSseClient(cb: (data: any) => void) {
+    this.publicSseClients.delete(cb);
+  }
+
+  public broadcastPublicStats() {
+    if (this.publicSseClients.size === 0) return;
+    const stats = this.getPlatformPublicStats();
+    const msg = { event: 'public_stats_update', data: stats, timestamp: Date.now() };
+    for (const client of this.publicSseClients) {
+      try {
+        client(msg);
+      } catch {
+        this.publicSseClients.delete(client);
+      }
+    }
+  }
+}
+
+export const botManager = new BotManager();
