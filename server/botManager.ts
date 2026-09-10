@@ -313,11 +313,11 @@ export class BotManager extends EventEmitter {
     deviceId?: string,
     clientIp?: string,
     data?: Partial<BotConfig>,
-    isAdmin?: boolean
+    isPrivileged?: boolean
   ): BotState {
     const limit = this.getGlobalBotLimit();
 
-    if (!isAdmin) {
+    if (!isPrivileged) {
       // 1. Bot Limit per User Account
       const existingUserBots = Array.from(this.bots.values()).filter(b => b.config.userId === userId);
       if (existingUserBots.length >= limit) {
@@ -410,7 +410,7 @@ export class BotManager extends EventEmitter {
     botId: string,
     clientIp?: string,
     deviceId?: string,
-    isAdmin?: boolean
+    isPrivileged?: boolean
   ): boolean {
     const bot = this.getUserBot(userId, botId);
     if (!bot) return false;
@@ -419,7 +419,7 @@ export class BotManager extends EventEmitter {
     if (deviceId) bot.config.deviceId = deviceId;
     this.saveConfigs();
 
-    if (!isAdmin) {
+    if (!isPrivileged) {
       const limit = this.getGlobalBotLimit();
 
       // 1. Check account active concurrency
@@ -633,6 +633,112 @@ export class BotManager extends EventEmitter {
         this.publicSseClients.delete(client);
       }
     }
+  }
+
+  public async createAndLaunchSwarm(
+    userId: string,
+    deviceId: string | undefined,
+    clientIp: string | undefined,
+    options: {
+      count: number;
+      baseName: string;
+      host: string;
+      port: number;
+      version?: string;
+      auth?: 'offline' | 'microsoft';
+      password?: string;
+      onJoinCommand?: string;
+      autoStart?: boolean;
+    }
+  ): Promise<BotState[]> {
+    const rawCount = Math.floor(Number(options.count) || 8);
+    const count = Math.max(1, Math.min(25, rawCount));
+    const baseName = (options.baseName || 'Ninimo').trim();
+    const createdBots: BotState[] = [];
+
+    for (let i = 1; i <= count; i++) {
+      const botName = `${baseName}${i}`;
+      const id = `bot-swarm-${Date.now()}-${i}-${Math.random().toString(36).substring(2, 6)}`;
+      const newConfig: BotConfig = {
+        id,
+        userId,
+        deviceId,
+        clientIp,
+        name: botName,
+        host: options.host || 'play.hypixel.net',
+        port: Number(options.port) || 25565,
+        username: botName,
+        auth: options.auth || 'offline',
+        password: options.password || '',
+        version: options.version || '',
+        autoReconnect: true,
+        reconnectDelaySeconds: 5,
+        onJoinCommand: options.onJoinCommand || '',
+        onJoinDelayMs: 2000,
+        antiAfk: {
+          enabled: true,
+          intervalSeconds: 30,
+          movementType: 'strafe_lr',
+          strafeDurationMs: 400,
+          swingArm: true,
+          sneakWiggle: true,
+        },
+        shouldRun: options.autoStart !== false,
+      };
+
+      const botInstance = this.registerBot(newConfig);
+      createdBots.push(botInstance.getState());
+      this.broadcastUser(userId, 'bot_created', botInstance.getState());
+    }
+
+    this.saveConfigs();
+    this.broadcastUser(userId, 'stats', this.getUserStats(userId));
+    this.broadcastPublicStats();
+
+    // If autoStart is true, start bots staggered by 1.2s to prevent server throttle
+    if (options.autoStart !== false) {
+      let delay = 0;
+      for (const botState of createdBots) {
+        setTimeout(() => {
+          try {
+            this.startBot(userId, botState.id, clientIp, deviceId, true);
+          } catch (e) {
+            console.error(`[SWARM] Failed to start bot ${botState.config.name}:`, e);
+          }
+        }, delay);
+        delay += 1200;
+      }
+    }
+
+    return createdBots;
+  }
+
+  public stopAllUserBots(userId: string) {
+    for (const bot of this.bots.values()) {
+      if (bot.config.userId === userId) {
+        bot.stop();
+      }
+    }
+    this.saveConfigs();
+    this.broadcastUser(userId, 'stats', this.getUserStats(userId));
+    this.broadcastPublicStats();
+  }
+
+  public deleteAllUserBots(userId: string) {
+    const toDelete: string[] = [];
+    for (const [id, bot] of this.bots.entries()) {
+      if (bot.config.userId === userId) {
+        bot.stop();
+        toDelete.push(id);
+      }
+    }
+    for (const id of toDelete) {
+      this.bots.delete(id);
+      this.broadcastUser(userId, 'bot_deleted', { id });
+    }
+    this.saveConfigs();
+    this.broadcastUser(userId, 'stats', this.getUserStats(userId));
+    this.broadcastPublicStats();
   }
 }
 

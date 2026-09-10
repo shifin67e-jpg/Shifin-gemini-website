@@ -80,6 +80,7 @@ export interface User {
   username: string;
   email: string;
   isAdmin?: boolean;
+  isTester?: boolean;
   registrationIp?: string;
   deviceFingerprint?: string;
   createdAt: number;
@@ -90,6 +91,7 @@ export interface AdminAccountInfo {
   username: string;
   email: string;
   isAdmin?: boolean;
+  isTester?: boolean;
   registrationIp?: string;
   deviceFingerprint?: string;
   createdAt: number;

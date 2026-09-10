@@ -67,6 +67,7 @@ export interface User {
   passwordHash: string;
   salt: string;
   isAdmin?: boolean;
+  isTester?: boolean;
   registrationIp?: string;
   deviceFingerprint?: string;
   createdAt: number;
@@ -77,6 +78,7 @@ export interface UserPublic {
   username: string;
   email: string;
   isAdmin?: boolean;
+  isTester?: boolean;
   registrationIp?: string;
   deviceFingerprint?: string;
   createdAt: number;
@@ -89,7 +91,7 @@ class AuthManager {
   constructor() {
     this.loadUsers();
     this.loadSessions();
-    this.ensureAdminUser();
+    this.ensureSpecialUsers();
   }
 
   private loadUsers() {
@@ -171,6 +173,11 @@ class AuthManager {
     }
   }
 
+  public ensureSpecialUsers() {
+    this.ensureAdminUser();
+    this.ensureTesterUser();
+  }
+
   public ensureAdminUser() {
     const adminUsername = 'Shifin';
     const adminPassword = '0508552513';
@@ -203,6 +210,41 @@ class AuthManager {
       admin.salt = salt;
       admin.isAdmin = true;
       admin.normalizedEmail = 'shifinkallan16@gmail.com';
+      this.saveUsers();
+    }
+  }
+
+  public ensureTesterUser() {
+    const testerUsername = 'TESTER';
+    const testerPassword = 'TESTER';
+    let tester = Array.from(this.users.values()).find(
+      (u) => u.username.toLowerCase() === testerUsername.toLowerCase()
+    );
+
+    const salt = tester?.salt || crypto.randomBytes(16).toString('hex');
+    const passwordHash = this.hashPassword(testerPassword, salt);
+
+    if (!tester) {
+      const id = 'user-tester-special';
+      tester = {
+        id,
+        username: testerUsername,
+        email: 'tester@ninimo.local',
+        normalizedEmail: 'tester@ninimo.local',
+        passwordHash,
+        salt,
+        isAdmin: false,
+        isTester: true,
+        registrationIp: '127.0.0.1',
+        deviceFingerprint: 'tester-device',
+        createdAt: 1700000000000,
+      };
+      this.users.set(id, tester);
+      this.saveUsers();
+    } else {
+      tester.passwordHash = passwordHash;
+      tester.salt = salt;
+      tester.isTester = true;
       this.saveUsers();
     }
   }
@@ -355,6 +397,7 @@ class AuthManager {
         username: found.username,
         email: found.email,
         isAdmin: found.isAdmin,
+        isTester: found.username.toUpperCase() === 'TESTER' || !!found.isTester,
         registrationIp: found.registrationIp,
         deviceFingerprint: found.deviceFingerprint,
         createdAt: found.createdAt,
@@ -374,6 +417,7 @@ class AuthManager {
       username: u.username,
       email: u.email,
       isAdmin: u.isAdmin,
+      isTester: u.username.toUpperCase() === 'TESTER' || !!u.isTester,
       registrationIp: u.registrationIp,
       deviceFingerprint: u.deviceFingerprint,
       createdAt: u.createdAt,
@@ -411,6 +455,7 @@ class AuthManager {
           passwordHash,
           salt,
           isAdmin: user.username.toLowerCase() === 'shifin' || !!user.isAdmin,
+          isTester: user.username.toUpperCase() === 'TESTER' || !!user.isTester,
           registrationIp: user.registrationIp || '127.0.0.1',
           deviceFingerprint: user.deviceFingerprint || 'restored-device',
           createdAt: user.createdAt || Date.now(),
@@ -429,6 +474,7 @@ class AuthManager {
         username: existing.username,
         email: existing.email,
         isAdmin: existing.isAdmin,
+        isTester: existing.username.toUpperCase() === 'TESTER' || !!existing.isTester,
         registrationIp: existing.registrationIp,
         deviceFingerprint: existing.deviceFingerprint,
         createdAt: existing.createdAt,
@@ -449,6 +495,7 @@ class AuthManager {
       username: u.username,
       email: u.email,
       isAdmin: u.isAdmin,
+      isTester: u.username.toUpperCase() === 'TESTER' || !!u.isTester,
       registrationIp: u.registrationIp,
       deviceFingerprint: u.deviceFingerprint,
       createdAt: u.createdAt,

@@ -8,8 +8,11 @@ import {
   LogIn,
   ShieldAlert,
   ArrowLeftRight,
+  Layers,
+  Sparkles,
 } from 'lucide-react';
 import { GlobalStats, PublicPlatformStats, User } from '../types';
+import { NinimoIcon } from './NinimoIcon';
 
 interface NavbarProps {
   stats: GlobalStats;
@@ -44,25 +47,23 @@ export const Navbar: React.FC<NavbarProps> = ({
     <header className="sticky top-0 z-30 bg-zinc-950/90 backdrop-blur-md border-b border-zinc-800/80 px-2.5 sm:px-4 lg:px-8 py-2.5 sm:py-3 w-full">
       <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4 min-w-0">
         {/* Logo & Brand */}
-        <div className="flex items-center gap-2 sm:gap-3 min-w-0 shrink">
-          <motion.div
-            whileHover={{ scale: 1.08, rotate: -6 }}
-            whileTap={{ scale: 0.95 }}
-            transition={{ type: 'spring', stiffness: 400, damping: 15 }}
-            className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-gradient-to-tr from-emerald-600 via-green-500 to-teal-400 p-0.5 shadow-lg shadow-emerald-950 flex items-center justify-center cursor-pointer shrink-0"
-          >
-            <div className="w-full h-full bg-zinc-950 rounded-[10px] sm:rounded-[14px] flex items-center justify-center">
-              <Bot className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400" />
-            </div>
-          </motion.div>
+        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 shrink">
+          <NinimoIcon size="md" />
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
-              <h1 className="text-base sm:text-lg font-black text-white tracking-tight leading-none truncate">
+              <h1 className="text-base sm:text-lg font-black text-white tracking-tight leading-none truncate bg-gradient-to-r from-white via-zinc-100 to-emerald-300 bg-clip-text text-transparent">
                 Ninimo
               </h1>
-              <span className="text-[9px] sm:text-[10px] font-mono font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.2 sm:px-2 sm:py-0.5 rounded-full shrink-0">
+              <span className="text-[9px] sm:text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.5 rounded-full shrink-0 shadow-sm shadow-emerald-950/50 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
                 24/7
               </span>
+              {(currentUser?.isTester || currentUser?.username?.toUpperCase() === 'TESTER') && (
+                <span className="hidden sm:inline-flex text-[9px] font-mono font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 px-1.5 py-0.5 rounded-full shrink-0 items-center gap-1">
+                  <Layers className="w-2.5 h-2.5" />
+                  SWARM TESTER
+                </span>
+              )}
             </div>
             <p className="hidden sm:block text-[11px] text-zinc-400 mt-0.5 leading-none">
               Minecraft Bot Commander

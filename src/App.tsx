@@ -12,6 +12,7 @@ import { AuthModal } from './components/AuthModal';
 import { PlayersWidget } from './components/PlayersWidget';
 import { AdminPage } from './components/AdminPage';
 import { LivePlatformCounter } from './components/LivePlatformCounter';
+import { TesterSwarmCommander } from './components/TesterSwarmCommander';
 import {
   Shield,
   Zap,
@@ -81,6 +82,22 @@ export default function App() {
     };
     return fetch(url, { ...options, headers });
   }, []);
+
+  const refreshBots = useCallback(async () => {
+    if (!currentUser) return;
+    try {
+      const res = await authFetch('/api/bots');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.bots)) {
+          setBots(data.bots);
+          if (data.bots.length > 0 && !selectedBotId) {
+            setSelectedBotId(data.bots[0].id);
+          }
+        }
+      }
+    } catch {}
+  }, [currentUser, authFetch, selectedBotId]);
 
   // Check existing auth, global settings, and load public platform metrics on load
   useEffect(() => {
@@ -768,6 +785,16 @@ export default function App() {
                   Return to Admin Account
                 </button>
               </div>
+            )}
+
+            {/* Tester Account Multi-Bot Swarm Commander */}
+            {(currentUser?.isTester || currentUser?.username?.toUpperCase() === 'TESTER') && (
+              <TesterSwarmCommander
+                currentUser={currentUser}
+                token={localStorage.getItem('ninimo_token') || ''}
+                bots={bots}
+                onRefresh={refreshBots}
+              />
             )}
 
             {/* Bot Profiles Carousel / Selector */}

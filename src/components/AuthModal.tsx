@@ -9,12 +9,12 @@ import {
   ArrowRight,
   ShieldCheck,
   AlertCircle,
-  Bot,
   X,
   Check,
 } from 'lucide-react';
 import { getDeviceFingerprint } from '../lib/fingerprint';
 import { User } from '../types';
+import { NinimoIcon } from './NinimoIcon';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -105,15 +105,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         {/* Modal Header */}
         <div className="p-6 pb-4 flex items-center justify-between relative border-b border-zinc-800/80">
           <div className="flex items-center gap-3">
-            <motion.div
-              whileHover={{ rotate: 15, scale: 1.1 }}
-              transition={{ type: 'spring', stiffness: 400 }}
-              className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-600 to-green-400 p-0.5 shadow-lg shadow-emerald-950 flex items-center justify-center cursor-pointer"
-            >
-              <div className="w-full h-full bg-zinc-950 rounded-[14px] flex items-center justify-center">
-                <Bot className="w-5 h-5 text-emerald-400" />
-              </div>
-            </motion.div>
+            <NinimoIcon size="md" />
             <div>
               <h3 className="font-extrabold text-lg text-white tracking-tight flex items-center gap-1.5">
                 Ninimo <span className="text-emerald-400 font-normal text-xs bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-full font-mono">Auth</span>

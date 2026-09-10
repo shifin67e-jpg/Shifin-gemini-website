@@ -2,8 +2,113 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
+import { GoogleGenAI } from '@google/genai';
 import { botManager } from './server/botManager.js';
 import { authManager } from './server/auth.js';
+
+// Lazy Gemini client initialization
+let geminiClient: GoogleGenAI | null = null;
+function getGeminiClient(): GoogleGenAI | null {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+  if (!geminiClient) {
+    geminiClient = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    });
+  }
+  return geminiClient;
+}
+
+// Helper for offline knowledge answers if all remote Gemini models are temporarily experiencing high demand
+function getKnowledgeBaseFallback(query: string): string {
+  const q = query.toLowerCase();
+  if (q.includes('aternos') || q.includes('24/7') || q.includes('keep alive') || q.includes('sleep')) {
+    return `**Ninimo AI Assistant (Aternos 24/7 Guide)**\n\nAternos automatically turns off servers when empty. To keep it 24/7 online:\n\n1. **Cracked Mode**: In your Aternos options, toggle **Cracked: ON** (required for offline bots).\n2. **Anti-AFK**: In Ninimo Bot Settings, enable **Anti-AFK** and set action to **Strafe & Rotate** every 20-30s. This prevents Aternos from kicking the bot for idling.\n3. **Auto-Reconnect**: Ninimo will automatically reconnect if Aternos restarts or drops the socket.\n4. **On-Join Auth**: If your server uses AuthMe or LoginSecurity, add \`/login <password>\` in the On-Join Command field.`;
+  }
+  if (q.includes('login') || q.includes('register') || q.includes('password') || q.includes('auth')) {
+    return `**Ninimo AI Assistant (Auto-Login Setup)**\n\nTo auto-authenticate your bot on cracked or hub servers:\n\n- Open **Edit Bot Settings**\n- Find the **On-Join Command** field\n- Enter \`/login yourpassword\` (or \`/register yourpassword yourpassword\` if registering for the first time)\n- When the bot joins, Ninimo automatically waits 1.5 seconds and executes the command in chat.`;
+  }
+  if (q.includes('tester') || q.includes('swarm') || q.includes('fleet') || q.includes('multi')) {
+    return `**Ninimo AI Assistant (Multi-Bot Swarm)**\n\nThe \`TESTER\` account has fleet permissions:\n\n- Log into Ninimo with account \`TESTER\`\n- Use the **Swarm Bot Fleet** action to launch up to 8 bots simultaneously with sequential tags (\`Ninimo1\`, \`Ninimo2\`, etc.)\n- Great for testing server queue mechanics, faction chunk claiming, and proxy stress tests.`;
+  }
+  if (q.includes('disconnect') || q.includes('timeout') || q.includes('kick') || q.includes('error')) {
+    return `**Ninimo AI Assistant (Troubleshooting Disconnects)**\n\nCommon reasons bots get kicked:\n\n- **Not Authenticated**: Server is in Online Mode (premium Mojang only). Set server to **Cracked** or use Microsoft auth.\n- **AFK Kick**: Server kicked the bot after 5-10 minutes. Turn on Ninimo's **Anti-AFK Strafe/Look**.\n- **Spam Kick**: Ensure On-Join commands don't loop too fast.\n- **Port/IP Mismatch**: On Aternos/Minehut, use the dynamic IP (e.g. \`node-1.aternos.me:12345\`) rather than the subdomain.`;
+  }
+  return `**Ninimo AI Assistant**\n\nI can help you configure your Minecraft bots, set up 24/7 uptime on free hosts (Aternos, Minehut, FalixNodes), configure anti-AFK patterns, and troubleshoot connection errors!\n\n*Tip: Ask me specifically about "Aternos 24/7 setup", "Auto login commands", or "Anti-AFK strafing".*`;
+}
+
+async function handleGeminiChat(
+  userMessage: string,
+  history: Array<{ role: 'user' | 'model'; text: string }>
+): Promise<string> {
+  const client = getGeminiClient();
+  const systemInstruction = `You are Ninimo AI, an expert Minecraft Bot & 24/7 Server Assistant integrated into the Ninimo 24/7 Bot Commander platform.
+Your specialties:
+- Minecraft servers (Vanilla, Spigot, Paper, Purpur, Velocity, BungeeCord, Fabric, Forge)
+- Mineflayer bot mechanics, AFK scripts, anti-AFK patterns (strafe, rotate look, jump)
+- Free hosting 24/7 setups (Aternos, Minehut, FalixNodes, Server.pro)
+- In-game authentication commands (/login, /register, /auth, /hub, /queue)
+- Network errors (timeouts, disconnects, cracked vs online mode, protocol mismatches)
+- Multi-bot swarming (using the TESTER account for server fleet operations and stress testing)
+Give concise, helpful, friendly, and well-formatted answers with markdown code blocks and bullet points.`;
+
+  if (!client) {
+    return getKnowledgeBaseFallback(userMessage);
+  }
+
+  const contents: any[] = [];
+  if (Array.isArray(history)) {
+    for (const item of history.slice(-6)) {
+      contents.push({
+        role: item.role === 'model' ? 'model' : 'user',
+        parts: [{ text: item.text }],
+      });
+    }
+  }
+  contents.push({
+    role: 'user',
+    parts: [{ text: userMessage }],
+  });
+
+  // Candidate models: try fast 3.8 flash first, cascade to 3.1 flash lite or flash latest if 503/high-demand occurs
+  const candidateModels = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+  let lastError: any = null;
+
+  for (const modelName of candidateModels) {
+    try {
+      const response = await client.models.generateContent({
+        model: modelName,
+        contents,
+        config: {
+          systemInstruction,
+          temperature: 0.7,
+        },
+      });
+
+      if (response.text) {
+        return response.text;
+      }
+    } catch (err: any) {
+      lastError = err;
+      const errMsg = err?.message || String(err);
+      console.warn(`[GEMINI] Model ${modelName} encountered: ${errMsg}. Attempting fallback...`);
+      // If error is high demand (503), rate limit (429), or unavailable, continue to next candidate model
+      const isTemporary = errMsg.includes('503') || errMsg.includes('UNAVAILABLE') || errMsg.includes('high demand') || errMsg.includes('429');
+      if (!isTemporary && !errMsg.includes('not found')) {
+        // Continue trying alternative models
+      }
+    }
+  }
+
+  console.error('[GEMINI ALL MODELS FAILED]:', lastError);
+  // Graceful fallback to knowledge base if all remote Gemini models are temporarily under peak demand
+  return getKnowledgeBaseFallback(userMessage);
+}
 
 // Prevent any unhandled network errors (DNS lookup failures, broken pipes, timeouts) from crashing the server
 process.on('uncaughtException', (err) => {
@@ -198,7 +303,8 @@ async function startServer() {
       const user = (req as any).user;
       const deviceId = getDeviceId(req);
       const clientIp = getClientIp(req);
-      const newBot = botManager.createBot(user.id, deviceId, clientIp, req.body, user.isAdmin);
+      const isPrivileged = user.isAdmin || user.isTester || user.username?.toUpperCase() === 'TESTER';
+      const newBot = botManager.createBot(user.id, deviceId, clientIp, req.body, isPrivileged);
       res.status(201).json({ bot: newBot });
     } catch (err: any) {
       res.status(403).json({ error: err.message });
@@ -228,7 +334,8 @@ async function startServer() {
       const user = (req as any).user;
       const deviceId = getDeviceId(req);
       const clientIp = getClientIp(req);
-      const ok = botManager.startBot(user.id, req.params.id, clientIp, deviceId, user.isAdmin);
+      const isPrivileged = user.isAdmin || user.isTester || user.username?.toUpperCase() === 'TESTER';
+      const ok = botManager.startBot(user.id, req.params.id, clientIp, deviceId, isPrivileged);
       if (!ok) {
         return res.status(404).json({ error: 'Bot not found or unauthorized' });
       }
@@ -245,6 +352,64 @@ async function startServer() {
       return res.status(404).json({ error: 'Bot not found or unauthorized' });
     }
     res.json({ success: true, message: 'Bot stopped' });
+  });
+
+  // Multi-bot Swarm (TESTER / Admin exclusive feature)
+  app.post('/api/bots/swarm', requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const isPrivileged = user.isAdmin || user.isTester || user.username?.toUpperCase() === 'TESTER';
+      if (!isPrivileged) {
+        return res.status(403).json({ error: 'Multi-bot swarm joining is exclusive to the TESTER account.' });
+      }
+
+      const deviceId = getDeviceId(req);
+      const clientIp = getClientIp(req);
+      const { count, baseName, host, port, version, auth, password, onJoinCommand, autoStart } = req.body;
+
+      const swarmBots = await botManager.createAndLaunchSwarm(user.id, deviceId, clientIp, {
+        count: Number(count) || 8,
+        baseName: baseName || 'Ninimo',
+        host: host || 'play.hypixel.net',
+        port: Number(port) || 25565,
+        version: version || '',
+        auth: auth || 'offline',
+        password: password || '',
+        onJoinCommand: onJoinCommand || '',
+        autoStart: autoStart !== false,
+      });
+
+      res.json({ success: true, count: swarmBots.length, bots: swarmBots });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Failed to spawn swarm' });
+    }
+  });
+
+  app.post('/api/bots/stop-all', requireAuth, (req, res) => {
+    const user = (req as any).user;
+    botManager.stopAllUserBots(user.id);
+    res.json({ success: true, message: 'All user bots stopped' });
+  });
+
+  app.post('/api/bots/delete-all', requireAuth, (req, res) => {
+    const user = (req as any).user;
+    botManager.deleteAllUserBots(user.id);
+    res.json({ success: true, message: 'All user bots deleted' });
+  });
+
+  // Gemini AI Assistant Chat Endpoint
+  app.post('/api/gemini/chat', async (req, res) => {
+    try {
+      const { message, history } = req.body;
+      if (!message || typeof message !== 'string') {
+        return res.status(400).json({ error: 'Message is required' });
+      }
+      const reply = await handleGeminiChat(message, history || []);
+      res.json({ reply });
+    } catch (err: any) {
+      console.error('[GEMINI API ERROR]:', err);
+      res.status(500).json({ error: err.message || 'Failed to get Gemini response' });
+    }
   });
 
   app.post('/api/bots/:id/restart', requireAuth, (req, res) => {
