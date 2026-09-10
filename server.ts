@@ -1,10 +1,12 @@
 import express from 'express';
+import http from 'http';
 import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import { botManager } from './server/botManager.js';
 import { authManager } from './server/auth.js';
+import { setupBotViewer } from './server/botViewer.js';
 
 // Lazy Gemini client initialization
 let geminiClient: GoogleGenAI | null = null;
@@ -120,6 +122,11 @@ process.on('unhandledRejection', (reason) => {
 
 async function startServer() {
   const app = express();
+  const server = http.createServer(app);
+
+  // Initialize Prismarine 3D Bot Perspective Viewer
+  setupBotViewer(app, server, botManager);
+
   // Port resolution: AI Studio sandbox routes strictly to port 3000 via internal proxy.
   // On Railway or standard production hosts, listen dynamically on the assigned process.env.PORT.
   const isAiStudioSandbox = Boolean(process.env.APPLET_ID || process.env.CONTROL_PLANE_PORT);
@@ -634,7 +641,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  server.listen(PORT, '0.0.0.0', () => {
     console.log(`Ninimo 24/7 server running on http://0.0.0.0:${PORT}`);
     
     // Server-wide memory watchdog: prevents Cloud Run container OOM kills

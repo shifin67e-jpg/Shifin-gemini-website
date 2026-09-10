@@ -14,6 +14,7 @@ import {
   AlertTriangle,
   Heart,
   Beef,
+  Video,
 } from 'lucide-react';
 import { BotState } from '../types';
 import { HeartsAndHunger } from './HeartsAndHunger';
@@ -26,6 +27,8 @@ interface BotHudProps {
   onEdit: (bot: BotState) => void;
   onDelete: (id: string) => void;
   onToggleAntiAfk: (id: string, enabled: boolean) => void;
+  isAdmin?: boolean;
+  onOpenAdminCamera?: () => void;
 }
 
 export const BotHud: React.FC<BotHudProps> = ({
@@ -36,6 +39,8 @@ export const BotHud: React.FC<BotHudProps> = ({
   onEdit,
   onDelete,
   onToggleAntiAfk,
+  isAdmin,
+  onOpenAdminCamera,
 }) => {
   const [avatarError, setAvatarError] = useState(false);
 
@@ -232,6 +237,20 @@ export const BotHud: React.FC<BotHudProps> = ({
             >
               <Trash2 className="w-3.5 h-3.5" />
             </motion.button>
+
+            {isAdmin && onOpenAdminCamera && (
+              <motion.button
+                id="btn-admin-bot-pov"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={onOpenAdminCamera}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/15 hover:bg-red-500/25 text-red-300 border border-red-500/30 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm shadow-red-950/40"
+                title="Admin Bot POV Camera (Prismarine 3D)"
+              >
+                <Video className="w-3.5 h-3.5 text-red-400" />
+                <span>POV Camera</span>
+              </motion.button>
+            )}
           </div>
         </div>
       </div>

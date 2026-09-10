@@ -13,6 +13,7 @@ import { PlayersWidget } from './components/PlayersWidget';
 import { AdminPage } from './components/AdminPage';
 import { LivePlatformCounter } from './components/LivePlatformCounter';
 import { TesterSwarmCommander } from './components/TesterSwarmCommander';
+import { AdminBotCameraModal } from './components/AdminBotCameraModal';
 import {
   Shield,
   Zap,
@@ -58,6 +59,8 @@ export default function App() {
     }
   });
   const [globalBotLimit, setGlobalBotLimit] = useState<number>(1);
+  const [isUserCameraOpen, setIsUserCameraOpen] = useState(false);
+  const [userCameraBotId, setUserCameraBotId] = useState<string | undefined>(undefined);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -865,6 +868,11 @@ export default function App() {
                     }}
                     onDelete={handleDeleteBot}
                     onToggleAntiAfk={handleToggleAntiAfk}
+                    isAdmin={Boolean(currentUser?.isAdmin)}
+                    onOpenAdminCamera={() => {
+                      setUserCameraBotId(activeBot.id);
+                      setIsUserCameraOpen(true);
+                    }}
                   />
                 </div>
 
@@ -980,6 +988,24 @@ export default function App() {
           />
         )}
       </AnimatePresence>
+
+      {/* Admin Bot POV Surveillance Camera Modal */}
+      {currentUser?.isAdmin && (
+        <AdminBotCameraModal
+          isOpen={isUserCameraOpen}
+          onClose={() => setIsUserCameraOpen(false)}
+          initialBotId={userCameraBotId || activeBot?.id}
+          bots={bots.map((b) => ({
+            id: b.id,
+            name: b.name,
+            username: b.config.username,
+            host: b.config.host,
+            port: b.config.port,
+            status: b.status,
+          }))}
+          token={localStorage.getItem('ninimo_token') || ''}
+        />
+      )}
     </div>
   );
 }

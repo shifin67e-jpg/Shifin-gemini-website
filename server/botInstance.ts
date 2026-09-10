@@ -78,6 +78,10 @@ export class BotInstance extends EventEmitter {
     }
   }
 
+  public getMineflayerBot(): any {
+    return this.bot;
+  }
+
   public start() {
     this.isManuallyStopped = false;
     this.lastError = null;

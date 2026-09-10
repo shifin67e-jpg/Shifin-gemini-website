@@ -534,6 +534,10 @@ export class BotManager extends EventEmitter {
       .map((b) => b.getState());
   }
 
+  public getBot(botId: string): BotInstance | undefined {
+    return this.bots.get(botId);
+  }
+
   public adminStartBot(botId: string): boolean {
     const bot = this.bots.get(botId);
     if (!bot) return false;

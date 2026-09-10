@@ -17,8 +17,11 @@ import {
   Server,
   Activity,
   Sparkles,
+  Video,
+  Eye,
 } from 'lucide-react';
 import { AdminAccountInfo, User } from '../types';
+import { AdminBotCameraModal } from './AdminBotCameraModal';
 
 interface AdminPageProps {
   currentUser: User;
@@ -41,6 +44,23 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [isCameraModalOpen, setIsCameraModalOpen] = useState(false);
+  const [selectedCameraBotId, setSelectedCameraBotId] = useState<string | undefined>(undefined);
+
+  const token = localStorage.getItem('ninimo_token') || '';
+
+  const allFleetBots = React.useMemo(() => {
+    return accounts.flatMap((acc) =>
+      acc.bots.map((b) => ({
+        id: b.id,
+        name: b.name,
+        username: b.username,
+        host: b.host,
+        port: b.port,
+        status: b.status,
+      }))
+    );
+  }, [accounts]);
 
   const fetchAdminData = async () => {
     setLoading(true);
@@ -234,8 +254,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         )}
       </AnimatePresence>
 
-      {/* Overview Stats + Global Bot Limit Changer */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* Overview Stats + Global Bot Limit Changer + Surveillance Camera */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Quick Stats 1 */}
         <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 shadow-lg flex items-center gap-4">
           <div className="w-12 h-12 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
@@ -258,6 +278,33 @@ export const AdminPage: React.FC<AdminPageProps> = ({
             </div>
             <div className="text-xs text-zinc-400 font-medium">Minecraft Bots In Fleet</div>
           </div>
+        </div>
+
+        {/* Admin POV Surveillance Camera Quick Launch */}
+        <div className="bg-zinc-900 border border-red-500/30 rounded-2xl p-5 shadow-lg relative overflow-hidden flex flex-col justify-between">
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <div className="flex items-center gap-2">
+              <div className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
+              <h3 className="text-xs font-bold text-red-400 uppercase tracking-wider">Bot POV Feeds</h3>
+            </div>
+            <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500/20 text-red-300">
+              PRISMARINE
+            </span>
+          </div>
+          <p className="text-[11px] text-zinc-400 mb-3 leading-tight">
+            Stream first-person eyes & live 3D chunk voxels as an admin.
+          </p>
+          <button
+            onClick={() => {
+              setSelectedCameraBotId(allFleetBots[0]?.id);
+              setIsCameraModalOpen(true);
+            }}
+            disabled={allFleetBots.length === 0}
+            className="w-full py-2 px-3 rounded-xl bg-red-600/90 hover:bg-red-500 text-white text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-md shadow-red-950/40 disabled:opacity-50"
+          >
+            <Video className="w-3.5 h-3.5" />
+            <span>Launch Cameras ({allFleetBots.length})</span>
+          </button>
         </div>
 
         {/* Global Bot Limit Card */}
@@ -445,7 +492,19 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                             </div>
 
                             {/* Bot controls */}
-                            <div className="flex items-center gap-1 shrink-0">
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                title="Watch Bot POV Camera (Admin Only)"
+                                onClick={() => {
+                                  setSelectedCameraBotId(bot.id);
+                                  setIsCameraModalOpen(true);
+                                }}
+                                className="p-1.5 px-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 hover:border-red-500/40 transition-all flex items-center gap-1 text-[10px] font-bold"
+                              >
+                                <Video className="w-3.5 h-3.5 text-red-400" />
+                                <span className="hidden sm:inline">POV</span>
+                              </button>
+
                               {bot.status === 'online' ? (
                                 <button
                                   title="Stop Bot"
@@ -485,6 +544,15 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           </div>
         )}
       </div>
+
+      {/* Admin Bot POV Surveillance Camera Modal */}
+      <AdminBotCameraModal
+        isOpen={isCameraModalOpen}
+        onClose={() => setIsCameraModalOpen(false)}
+        initialBotId={selectedCameraBotId}
+        bots={allFleetBots}
+        token={token}
+      />
     </div>
   );
 };
