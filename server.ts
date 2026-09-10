@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { botManager } from './server/botManager.js';
 import { authManager } from './server/auth.js';
@@ -14,7 +15,12 @@ process.on('unhandledRejection', (reason) => {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  // Port resolution: AI Studio sandbox routes strictly to port 3000 via internal proxy.
+  // On Railway or standard production hosts, listen dynamically on the assigned process.env.PORT.
+  const isAiStudioSandbox = Boolean(process.env.APPLET_ID || process.env.CONTROL_PLANE_PORT);
+  const PORT = isAiStudioSandbox
+    ? (Number(process.env.DEFAULT_APP_PORT) || 3000)
+    : (Number(process.env.PORT) || 3000);
 
   app.use(express.json());
 
@@ -438,18 +444,28 @@ async function startServer() {
     });
   });
 
-  // Vite middleware setup
-  if (process.env.NODE_ENV !== 'production') {
+  // Vite middleware setup (development mode in AI Studio) vs static files (production / Railway)
+  const isDev = Boolean(process.env.APPLET_ID && process.env.NODE_ENV !== 'production');
+  const distPath = path.join(process.cwd(), 'dist');
+
+  if (isDev) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    // Railway or production: serve pre-compiled frontend assets
+    if (fs.existsSync(distPath)) {
+      app.use(express.static(distPath));
+    }
     app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+      const indexPath = path.join(distPath, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.status(503).send('Building application assets, please refresh in a moment...');
+      }
     });
   }
 
