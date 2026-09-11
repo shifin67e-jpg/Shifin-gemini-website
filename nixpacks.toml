@@ -1,6 +1,6 @@
 # Railway Nixpacks deployment configuration
 [phases.setup]
-nixPkgs = ["nodejs_20"]
+nixPkgs = ["nodejs_20", "openssh"]
 
 [phases.install]
 cmds = ["npm install"]

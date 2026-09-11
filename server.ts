@@ -637,12 +637,12 @@ async function startServer() {
   });
 
   // Tunnel status endpoint for dashboard
-  let publicTunnelUrl: string | null = `https://${process.env.SERVEO_SUBDOMAIN || 'Ninimo-AFK'}.serveo.net`;
+  let publicServeoUrl: string = `https://${(process.env.SERVEO_SUBDOMAIN || 'Ninimo-AFK').toLowerCase()}.serveo.net`;
+  let publicLocaltunnelUrl: string | null = null;
   app.get('/api/tunnel', (req, res) => {
     res.json({
-      enabled: process.env.ENABLE_SERVEO !== 'false',
-      provider: 'serveo',
-      url: publicTunnelUrl,
+      serveoUrl: publicServeoUrl,
+      localtunnelUrl: publicLocaltunnelUrl,
       subdomain: process.env.SERVEO_SUBDOMAIN || 'Ninimo-AFK',
       port: PORT,
     });
@@ -676,11 +676,20 @@ async function startServer() {
   // Serveo SSH Tunnel: tunnels port PORT to https://Ninimo-AFK.serveo.net using child_process.exec
   let serveoProcess: any = null;
   function initServeoTunnel(port: number) {
-    const subdomain = (process.env.SERVEO_SUBDOMAIN || 'Ninimo-AFK').trim();
+    const rawSubdomain = (process.env.SERVEO_SUBDOMAIN || 'Ninimo-AFK').trim();
+    // Subdomains in DNS/HTTP are lowercase
+    const subdomain = rawSubdomain.toLowerCase();
     const publicUrl = `https://${subdomain}.serveo.net`;
-    publicTunnelUrl = publicUrl;
+    publicServeoUrl = publicUrl;
 
-    const sshCommand = `ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -R ${subdomain}:80:localhost:${port} serveo.net`;
+    // Critical flags for non-interactive background SSH tunnel:
+    // -N: Do NOT execute remote shell command (prevents immediate process exit upon connecting)
+    // -T: Disable pseudo-terminal allocation
+    // -o StrictHostKeyChecking=no: Bypass host key verification prompt
+    // -o UserKnownHostsFile=/dev/null: Avoid permission issues writing to ~/.ssh/known_hosts in containers
+    // -o ServerAliveInterval=30: Send keep-alive packets every 30s
+    // -o ServerAliveCountMax=3: Disconnect and trigger reconnect if 3 keepalives fail
+    const sshCommand = `ssh -N -T -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -R ${subdomain}:80:localhost:${port} serveo.net`;
 
     console.log('\n' + '='.repeat(64));
     console.log('🚀 SERVEO PUBLIC CUSTOM ACCESS URL:');
@@ -692,9 +701,10 @@ async function startServer() {
     console.log('='.repeat(64) + '\n');
 
     try {
-      serveoProcess = exec(sshCommand, (error) => {
+      serveoProcess = exec(sshCommand, (error, stdout, stderr) => {
         if (error) {
-          console.warn(`[Serveo Notice]: SSH process ended (${error.message}). Reconnecting in 5s...`);
+          const errDetail = (stderr || stdout || error.message || '').trim();
+          console.warn(`[Serveo Notice]: SSH tunnel closed (${errDetail || error.message}). Re-opening in 5s...`);
         }
       });
 
@@ -713,13 +723,13 @@ async function startServer() {
       });
 
       serveoProcess.on('close', (code: number) => {
-        console.log(`[Serveo] Tunnel closed (exit code: ${code}). Reconnecting in 5s...`);
+        console.log(`[Serveo] SSH tunnel process finished (exit code: ${code}). Reconnecting in 5s...`);
         serveoProcess = null;
         setTimeout(() => initServeoTunnel(port), 5000);
       });
 
       serveoProcess.on('error', (err: any) => {
-        console.warn(`[Serveo Error]: ${err?.message || err}`);
+        console.warn(`[Serveo SSH Launch Warning]: ${err?.message || err}`);
       });
     } catch (err: any) {
       console.warn(`[Serveo Tunnel Error]: ${err?.message || err}. Retrying in 10s...`);
@@ -727,28 +737,35 @@ async function startServer() {
     }
   }
 
-  // Localtunnel fallback manager (optional if ENABLE_LOCALTUNNEL is explicitly true)
+  // Localtunnel fallback manager (spawns automatically alongside Serveo as a live backup)
   async function initLocaltunnel(port: number) {
-    const preferredSubdomain = process.env.LOCALTUNNEL_SUBDOMAIN?.trim();
-    console.log(`[Localtunnel] Initializing public tunnel for port ${port}...`);
-
+    const preferredSubdomain = process.env.LOCALTUNNEL_SUBDOMAIN?.trim() || 'ninimo-afk';
     try {
       const ltFn: any = typeof localtunnel === 'function' ? localtunnel : (localtunnel as any).default;
-      if (!ltFn) {
-        throw new Error('Localtunnel function not found in imported module');
-      }
+      if (!ltFn) return;
 
       const tunnel = await ltFn(port, {
         subdomain: preferredSubdomain || undefined,
       });
 
-      console.log(`[Localtunnel] Fallback URL ready: ${tunnel.url}`);
+      publicLocaltunnelUrl = tunnel.url;
+
+      console.log('\n' + '='.repeat(64));
+      console.log('⚡ BACKUP TUNNEL READY (LOCALTUNNEL):');
+      console.log(`👉 ${tunnel.url}`);
+      console.log('='.repeat(64) + '\n');
 
       tunnel.on('close', () => {
+        publicLocaltunnelUrl = null;
         setTimeout(() => initLocaltunnel(port), 5000);
+      });
+
+      tunnel.on('error', (err: any) => {
+        console.warn('[Localtunnel Warning]:', err?.message || err);
       });
     } catch (err: any) {
       console.warn(`[Localtunnel Notice]: ${err?.message || err}`);
+      setTimeout(() => initLocaltunnel(port), 15000);
     }
   }
 
@@ -761,8 +778,9 @@ async function startServer() {
       initServeoTunnel(PORT);
     }
 
-    // Optional Localtunnel fallback
-    if (process.env.ENABLE_LOCALTUNNEL === 'true') {
+    // Spawn Localtunnel as instant live backup unless explicitly disabled
+    const enableBackup = process.env.ENABLE_LOCALTUNNEL !== 'false';
+    if (enableBackup) {
       initLocaltunnel(PORT);
     }
     
