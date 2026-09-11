@@ -3,6 +3,7 @@ import fs from 'fs';
 import http from 'http';
 import express from 'express';
 import { Server as SocketIOServer } from 'socket.io';
+import { Server as EngineServer } from 'engine.io';
 import { BotManager } from './botManager.js';
 import { authManager } from './auth.js';
 
@@ -13,41 +14,29 @@ export function setupBotViewer(
 ) {
   const pvPublicDir = path.join(process.cwd(), 'node_modules/prismarine-viewer/public');
 
-  // Socket.IO Server attached with custom internal path
-  const io = new SocketIOServer(server, {
-    path: '/bot-viewer-socket.io',
+  // Dedicated Engine.io instance for Prismarine Viewer WebSockets & HTTP polling
+  const engine = new EngineServer({
     cors: { origin: '*' },
     transports: ['websocket', 'polling'],
   });
 
-  // Intercept socket.io HTTP requests before Express
-  server.on('request', (req, res) => {
-    if (req.url && req.url.includes('/admin-pov/') && req.url.includes('/socket.io')) {
-      const match = req.url.match(/\/admin-pov\/([^/]+)\/socket\.io(\/.*)?/);
-      if (match) {
-        const botId = match[1];
-        const subpath = match[2] || '';
-        const sep = req.url.includes('?') ? '&' : '?';
-        req.url = `/bot-viewer-socket.io${subpath}` + (req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : '') + `${sep}botId=${encodeURIComponent(botId)}`;
-      }
-    }
+  const io = new SocketIOServer();
+  io.bind(engine);
+
+  // Intercept Socket.IO polling HTTP requests directly in Express
+  app.all('/admin-pov/:botId/socket.io*', (req, res) => {
+    engine.handleRequest(req as any, res as any);
   });
 
-  // Intercept WebSocket upgrade requests for socket.io
+  // Intercept Socket.IO WebSocket Upgrade requests on the HTTP Server
   server.on('upgrade', (req, socket, head) => {
     if (req.url && req.url.includes('/admin-pov/') && req.url.includes('/socket.io')) {
-      const match = req.url.match(/\/admin-pov\/([^/]+)\/socket\.io(\/.*)?/);
-      if (match) {
-        const botId = match[1];
-        const subpath = match[2] || '';
-        const sep = req.url.includes('?') ? '&' : '?';
-        req.url = `/bot-viewer-socket.io${subpath}` + (req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : '') + `${sep}botId=${encodeURIComponent(botId)}`;
-      }
+      engine.handleUpgrade(req as any, socket as any, head);
     }
   });
 
-  // Helper to extract and verify admin user from request
-  function verifyAdminRequest(req: express.Request): boolean {
+  // Helper to extract and verify viewer permissions (Admin or Bot Owner)
+  function verifyViewerAccess(req: express.Request, botId: string): boolean {
     const authHeader = req.headers.authorization;
     const token = authHeader?.startsWith('Bearer ')
       ? authHeader.substring(7)
@@ -56,12 +45,16 @@ export function setupBotViewer(
 
     if (!token) return false;
     const user = authManager.getUserFromToken(token);
-    return Boolean(user && user.isAdmin);
+    if (!user) return false;
+    if (user.isAdmin) return true;
+
+    const bot = botManager.getBot(botId);
+    if (bot && bot.config.userId === user.id) return true;
+    return false;
   }
 
   // Admin Bot POV HTML Page
   app.get('/admin-pov/:botId', (req, res) => {
-    // Ensure trailing slash for relative asset resolution (index.js, worker.js)
     if (!req.path.endsWith('/')) {
       const queryStr = req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : '';
       return res.redirect(301, `/admin-pov/${encodeURIComponent(req.params.botId)}/${queryStr}`);
@@ -75,15 +68,26 @@ export function setupBotViewer(
 
   function serveCameraHtml(req: express.Request, res: express.Response) {
     const { botId } = req.params;
-    const isAdmin = verifyAdminRequest(req);
+    const isAllowed = verifyViewerAccess(req, botId);
 
-    if (!isAdmin) {
+    const token = (req.query.token as string) || '';
+    if (token) {
+      try {
+        res.cookie('admin_token', token, {
+          path: `/admin-pov/`,
+          maxAge: 86400000,
+          sameSite: 'lax',
+        });
+      } catch {}
+    }
+
+    if (!isAllowed) {
       return res.status(403).send(`
         <!DOCTYPE html>
         <html lang="en">
         <head>
           <meta charset="UTF-8">
-          <title>Access Denied • Admin Bot POV</title>
+          <title>Access Denied • Ninimo Camera</title>
           <style>
             body {
               background: #09090b;
@@ -122,8 +126,8 @@ export function setupBotViewer(
         <body>
           <div class="card">
             <div class="badge">SECURITY RESTRICTION</div>
-            <h1>ADMIN CLEARANCE REQUIRED</h1>
-            <p>Access to live Prismarine bot first-person perspective camera feeds is strictly restricted to platform administrators.</p>
+            <h1>CLEARANCE REQUIRED</h1>
+            <p>Access to live bot perspective surveillance is restricted to authorized administrators and bot owners.</p>
           </div>
         </body>
         </html>
@@ -145,26 +149,18 @@ export function setupBotViewer(
         </head>
         <body>
           <div class="card">
-            <h2 style="color: #fbbf24;">Bot Instance Not Found</h2>
-            <p style="color: #71717a; font-size: 13px;">No active bot with ID "${botId}" exists in the fleet.</p>
+            <h2 style="color: #fbbf24; margin-bottom: 8px;">Bot Instance Not Found</h2>
+            <p style="color: #71717a; font-size: 13px;">No active bot with ID "${escapeHtml(botId)}" exists in the fleet.</p>
           </div>
         </body>
         </html>
       `);
     }
 
-    const token = (req.query.token as string) || '';
-    if (token) {
-      res.cookie('admin_token', token, {
-        path: `/admin-pov/`,
-        maxAge: 86400000,
-        sameSite: 'lax',
-      });
-    }
-
     const botName = botInstance.config.name || botInstance.config.username;
     const botUser = botInstance.config.username;
     const serverHost = `${botInstance.config.host}:${botInstance.config.port}`;
+    const initialPos = botInstance.position || { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 };
 
     const html = `<!DOCTYPE html>
 <html lang="en">
@@ -206,7 +202,7 @@ export function setupBotViewer(
       display: flex;
       flex-direction: column;
       justify-content: space-between;
-      padding: 16px;
+      padding: 14px;
     }
 
     .interactive {
@@ -241,7 +237,7 @@ export function setupBotViewer(
     }
 
     .cam-tag {
-      background: rgba(10, 10, 12, 0.75);
+      background: rgba(10, 10, 12, 0.82);
       backdrop-filter: blur(8px);
       border: 1px solid rgba(255, 255, 255, 0.15);
       border-radius: 8px;
@@ -285,12 +281,12 @@ export function setupBotViewer(
     }
 
     .time-badge {
-      background: rgba(10, 10, 12, 0.75);
+      background: rgba(10, 10, 12, 0.82);
       backdrop-filter: blur(8px);
       border: 1px solid rgba(255, 255, 255, 0.12);
       border-radius: 6px;
       padding: 6px 10px;
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 700;
       color: #34d399;
     }
@@ -307,14 +303,14 @@ export function setupBotViewer(
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 80px;
-      height: 80px;
+      width: 70px;
+      height: 70px;
     }
 
     .reticle-center {
-      width: 6px;
-      height: 6px;
-      background: rgba(255, 255, 255, 0.8);
+      width: 4px;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.9);
       border-radius: 50%;
       box-shadow: 0 0 4px rgba(255, 255, 255, 0.8);
     }
@@ -322,8 +318,8 @@ export function setupBotViewer(
     .reticle-bracket {
       position: absolute;
       border: 2px solid rgba(52, 211, 153, 0.8);
-      width: 14px;
-      height: 14px;
+      width: 12px;
+      height: 12px;
     }
     .reticle-bracket.tl { top: 0; left: 0; border-right: 0; border-bottom: 0; }
     .reticle-bracket.tr { top: 0; right: 0; border-left: 0; border-bottom: 0; }
@@ -334,20 +330,20 @@ export function setupBotViewer(
     .bottom-bar {
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 8px;
     }
 
     .telemetry-strip {
-      background: rgba(10, 10, 12, 0.85);
+      background: rgba(10, 10, 12, 0.88);
       backdrop-filter: blur(10px);
-      border: 1px solid rgba(255, 255, 255, 0.15);
+      border: 1px solid rgba(255, 255, 255, 0.18);
       border-radius: 10px;
-      padding: 10px 16px;
+      padding: 10px 14px;
       display: flex;
       flex-wrap: wrap;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
+      gap: 10px;
       font-size: 11px;
       box-shadow: 0 8px 16px rgba(0, 0, 0, 0.6);
     }
@@ -360,9 +356,10 @@ export function setupBotViewer(
 
     .tele-label {
       color: #71717a;
-      font-weight: 700;
+      font-weight: 800;
       text-transform: uppercase;
       font-size: 10px;
+      letter-spacing: 0.5px;
     }
 
     .tele-val {
@@ -415,37 +412,23 @@ export function setupBotViewer(
       box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
     }
 
-    /* Connecting / Offline Radar Splash */
-    .connecting-card {
+    /* Offline / Connecting Alert Banner */
+    .status-banner {
       position: absolute;
-      top: 50%;
+      top: 70px;
       left: 50%;
-      transform: translate(-50%, -50%);
-      background: rgba(18, 18, 22, 0.9);
-      backdrop-filter: blur(12px);
+      transform: translateX(-50%);
+      background: rgba(24, 24, 27, 0.9);
       border: 1px solid rgba(255, 255, 255, 0.15);
-      border-radius: 16px;
-      padding: 24px 32px;
-      text-align: center;
-      z-index: 20;
+      border-radius: 8px;
+      padding: 6px 14px;
+      font-size: 11px;
+      color: #fbbf24;
       display: none;
-      box-shadow: 0 20px 30px rgba(0, 0, 0, 0.8);
-      max-width: 360px;
-      pointer-events: auto;
-    }
-
-    .spinner {
-      width: 32px;
-      height: 32px;
-      border: 3px solid rgba(52, 211, 153, 0.2);
-      border-top-color: #34d399;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-      margin: 0 auto 12px;
-    }
-
-    @keyframes spin {
-      to { transform: rotate(360deg); }
+      align-items: center;
+      gap: 8px;
+      z-index: 15;
+      backdrop-filter: blur(8px);
     }
   </style>
 </head>
@@ -459,6 +442,11 @@ export function setupBotViewer(
     <div class="reticle-bracket bl"></div>
     <div class="reticle-bracket br"></div>
     <div class="reticle-center"></div>
+  </div>
+
+  <!-- Status banner -->
+  <div class="status-banner" id="status-banner">
+    <span id="status-banner-text">Connecting to world...</span>
   </div>
 
   <!-- Top and Bottom HUD Elements -->
@@ -476,7 +464,7 @@ export function setupBotViewer(
       <div class="top-right">
         <div class="time-badge" id="utc-clock">00:00:00 UTC</div>
         <div class="interactive" style="display:flex; gap:6px;">
-          <button class="hud-btn" id="btn-night-vision" title="Toggle Night Vision / CCTV filter">
+          <button class="hud-btn" id="btn-night-vision" title="Toggle Night Vision CCTV Mode">
             <span>NVG</span>
           </button>
           <button class="hud-btn" id="btn-fullscreen" title="Toggle Fullscreen">
@@ -486,43 +474,37 @@ export function setupBotViewer(
       </div>
     </div>
 
-    <!-- Center Connecting Overlay if not in world yet -->
-    <div class="connecting-card" id="connecting-card">
-      <div class="spinner"></div>
-      <h3 style="font-size:14px; font-weight:800; color:#fff; margin-bottom:6px;">ACQUIRING SATELLITE CHUNKS</h3>
-      <p style="font-size:11px; color:#a1a1aa; line-height:1.5;">
-        Awaiting bot spawn in <span style="color:#38bdf8;">${escapeHtml(serverHost)}</span>.<br>
-        Rendering live chunks once world packets stream.
-      </p>
-    </div>
-
     <!-- Bottom Bar -->
     <div class="bottom-bar">
       <!-- Live Bot Telemetry -->
       <div class="telemetry-strip">
         <div class="tele-item">
           <span class="tele-label">POS</span>
-          <span class="tele-val accent" id="val-pos">X: 0.0  Y: 0.0  Z: 0.0</span>
+          <span class="tele-val accent" id="val-pos">X: ${initialPos.x.toFixed(1)}  Y: ${initialPos.y.toFixed(1)}  Z: ${initialPos.z.toFixed(1)}</span>
         </div>
         <div class="tele-item">
           <span class="tele-label">FACING</span>
-          <span class="tele-val" id="val-facing">0.0° / 0.0°</span>
+          <span class="tele-val" id="val-facing">${((initialPos.yaw || 0) * (180 / Math.PI)).toFixed(0)}° / ${((initialPos.pitch || 0) * (180 / Math.PI)).toFixed(0)}°</span>
         </div>
         <div class="tele-item">
           <span class="tele-label">DIM</span>
-          <span class="tele-val" id="val-dim">OVERWORLD</span>
+          <span class="tele-val" id="val-dim">${(botInstance.dimension || 'OVERWORLD').toUpperCase()}</span>
         </div>
         <div class="tele-item">
           <span class="tele-label">HEALTH</span>
-          <span class="tele-val green" id="val-hp">20 / 20 ❤</span>
+          <span class="tele-val green" id="val-hp">${botInstance.health ?? 20} / 20 ❤</span>
         </div>
         <div class="tele-item">
           <span class="tele-label">FOOD</span>
-          <span class="tele-val" id="val-food" style="color:#f59e0b;">20 / 20 🍖</span>
+          <span class="tele-val" id="val-food" style="color:#f59e0b;">${botInstance.food ?? 20} / 20 🍖</span>
         </div>
         <div class="tele-item">
           <span class="tele-label">STATUS</span>
-          <span class="tele-val green" id="val-status">ONLINE</span>
+          <span class="tele-val green" id="val-status">${(botInstance.status || 'ONLINE').toUpperCase()}</span>
+        </div>
+        <div class="tele-item">
+          <span class="tele-label">PING</span>
+          <span class="tele-val" id="val-ping">${botInstance.ping || 0}ms</span>
         </div>
       </div>
 
@@ -537,17 +519,20 @@ export function setupBotViewer(
           </button>
         </div>
         <div style="font-size:10px; color:#71717a; text-transform:uppercase; letter-spacing:0.5px;">
-          PrismarineJS WebGL Engine • Ninimo 24/7
+          Ninimo 24/7 • PrismarineJS WebGL Engine
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Prismarine Viewer Client Bundle (Served from node_modules/prismarine-viewer/public/index.js) -->
+  <!-- Prismarine Viewer Client Bundle -->
   <script type="text/javascript" src="index.js"></script>
 
   <script>
     (function() {
+      const botId = ${JSON.stringify(botId)};
+      const token = ${JSON.stringify(token)};
+
       // Clock updater
       const clockEl = document.getElementById('utc-clock');
       function updateClock() {
@@ -586,45 +571,55 @@ export function setupBotViewer(
         hudToggleBtn.textContent = hudVisible ? 'HUD: ON' : 'HUD: OFF';
       });
 
-      // Poll telemetry via API for smooth HUD numbers
+      // Live Telemetry Poller
       const posEl = document.getElementById('val-pos');
       const facingEl = document.getElementById('val-facing');
       const dimEl = document.getElementById('val-dim');
       const hpEl = document.getElementById('val-hp');
       const foodEl = document.getElementById('val-food');
       const statusEl = document.getElementById('val-status');
-      const connectingCard = document.getElementById('connecting-card');
+      const pingEl = document.getElementById('val-ping');
+      const bannerEl = document.getElementById('status-banner');
+      const bannerTextEl = document.getElementById('status-banner-text');
 
       async function refreshTelemetry() {
         try {
-          const res = await fetch('/api/admin/bots/${encodeURIComponent(botId)}/telemetry');
+          const query = token ? '?token=' + encodeURIComponent(token) : '';
+          const res = await fetch('/api/admin/bots/' + encodeURIComponent(botId) + '/telemetry' + query);
           if (!res.ok) return;
           const data = await res.json();
           if (data && data.bot) {
             const b = data.bot;
             const p = b.position || { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 };
-            posEl.textContent = 'X: ' + (p.x || 0).toFixed(1) + '  Y: ' + (p.y || 0).toFixed(1) + '  Z: ' + (p.z || 0).toFixed(1);
+            posEl.textContent = 'X: ' + (Number(p.x) || 0).toFixed(1) + '  Y: ' + (Number(p.y) || 0).toFixed(1) + '  Z: ' + (Number(p.z) || 0).toFixed(1);
             
-            const yawDeg = ((p.yaw || 0) * (180 / Math.PI)).toFixed(0);
-            const pitchDeg = ((p.pitch || 0) * (180 / Math.PI)).toFixed(0);
+            const yawDeg = ((Number(p.yaw) || 0) * (180 / Math.PI)).toFixed(0);
+            const pitchDeg = ((Number(p.pitch) || 0) * (180 / Math.PI)).toFixed(0);
             facingEl.textContent = yawDeg + '° / ' + pitchDeg + '°';
             
-            dimEl.textContent = (b.dimension || 'OVERWORLD').toUpperCase();
+            dimEl.textContent = (data.dimension || b.dimension || 'OVERWORLD').toUpperCase();
             hpEl.textContent = (b.health ?? 20) + ' / 20 ❤';
             foodEl.textContent = (b.food ?? 20) + ' / 20 🍖';
-            statusEl.textContent = (b.status || 'UNKNOWN').toUpperCase();
+            
+            const st = (b.status || 'OFFLINE').toUpperCase();
+            statusEl.textContent = st;
+            statusEl.className = 'tele-val ' + (b.status === 'online' ? 'green' : 'accent');
+            
+            if (pingEl) pingEl.textContent = (data.ping || b.ping || 0) + 'ms';
 
-            // Show connecting splash if not in world
             if (b.status !== 'online') {
-              connectingCard.style.display = 'block';
+              bannerEl.style.display = 'flex';
+              bannerTextEl.textContent = '● BOT STATUS: ' + st + ' (Awaiting world spawn)';
             } else {
-              connectingCard.style.display = 'none';
+              bannerEl.style.display = 'none';
             }
           }
-        } catch (e) {}
+        } catch (e) {
+          // Keep current values on network blip
+        }
       }
 
-      setInterval(refreshTelemetry, 1000);
+      setInterval(refreshTelemetry, 800);
       refreshTelemetry();
     })();
   </script>
@@ -637,45 +632,68 @@ export function setupBotViewer(
 
   // Telemetry endpoint for the HUD
   app.get('/api/admin/bots/:botId/telemetry', (req, res) => {
-    if (!verifyAdminRequest(req)) {
-      return res.status(403).json({ error: 'Admin access required' });
+    const { botId } = req.params;
+    if (!verifyViewerAccess(req, botId)) {
+      return res.status(403).json({ error: 'Admin / Owner access required' });
     }
-    const bot = botManager.getBot(req.params.botId);
+    const bot = botManager.getBot(botId);
     if (!bot) {
       return res.status(404).json({ error: 'Bot not found' });
     }
+
+    const rawBot = bot.getMineflayerBot();
+    const state = bot.getState();
+
     res.json({
-      bot: bot.getState(),
+      bot: state,
+      inWorld: Boolean(rawBot && rawBot.world && rawBot.entity),
+      dimension: state.dimension || rawBot?.game?.dimension || 'overworld',
+      gamemode: state.gamemode || rawBot?.game?.gameMode || 'survival',
+      ping: rawBot?.player?.ping || state.ping || 0,
+      version: rawBot?.version || '1.16.4',
     });
   });
 
   // Serve static assets for the viewer from prismarine-viewer's public folder
-  app.use('/admin-pov/:botId/', express.static(pvPublicDir));
+  app.use('/admin-pov/:botId', express.static(pvPublicDir));
 
   // Socket.IO bot stream connection
   io.on('connection', (socket) => {
-    const query = socket.handshake.query;
-    const botId = query.botId as string;
-    const token = (query.token as string) || (socket.handshake.auth?.token as string);
+    const rawUrl = socket.request.url || '';
+    const match = rawUrl.match(/\/admin-pov\/([^/?#]+)\/socket\.io/);
+    const botId = match ? decodeURIComponent(match[1]) : (socket.handshake.query.botId as string);
+
+    const token =
+      (socket.handshake.query.token as string) ||
+      (socket.handshake.auth?.token as string) ||
+      rawUrl.match(/[?&]token=([^&#]+)/)?.[1];
 
     // Auth verification
     const user = token ? authManager.getUserFromToken(token) : null;
-    const isAllowed = user && user.isAdmin;
+    let isAllowed = Boolean(user && user.isAdmin);
 
-    // Also check cookies if token not explicitly in query
-    const cookieToken = socket.handshake.headers.cookie?.match(/admin_token=([^;]+)/)?.[1];
-    const cookieUser = cookieToken ? authManager.getUserFromToken(cookieToken) : null;
-    const isCookieAllowed = cookieUser && cookieUser.isAdmin;
+    if (!isAllowed) {
+      // Check cookies
+      const cookieToken = socket.handshake.headers.cookie?.match(/admin_token=([^;]+)/)?.[1];
+      const cookieUser = cookieToken ? authManager.getUserFromToken(cookieToken) : null;
+      if (cookieUser && cookieUser.isAdmin) {
+        isAllowed = true;
+      }
+    }
 
-    if (!isAllowed && !isCookieAllowed) {
-      console.warn(`[PRISMARINE VIEWER] Unauthorized connection attempt to bot POV: ${botId}`);
+    const botInstance = botId ? botManager.getBot(botId) : undefined;
+    if (!isAllowed && botInstance && user && botInstance.config.userId === user.id) {
+      isAllowed = true;
+    }
+
+    if (!isAllowed) {
+      console.warn(`[PRISMARINE VIEWER] Connection rejected (unauthorized) for bot: ${botId}`);
       socket.disconnect(true);
       return;
     }
 
-    const botInstance = botManager.getBot(botId);
     if (!botInstance) {
-      console.warn(`[PRISMARINE VIEWER] Bot ${botId} not found for live stream`);
+      console.warn(`[PRISMARINE VIEWER] Bot ${botId} not found in manager`);
       socket.disconnect(true);
       return;
     }
@@ -687,12 +705,12 @@ export function setupBotViewer(
 
     // If Mineflayer bot is running in-world, attach Prismarine WorldView
     if (rawBot && rawBot.world && rawBot.entity) {
-      attachWorldView(rawBot, socket);
+      attachWorldView(rawBot, socket, botInstance);
     } else if (rawBot) {
       // Bot is currently connecting or queueing, wait for spawn event
       const onSpawn = () => {
         if (rawBot.world && rawBot.entity) {
-          attachWorldView(rawBot, socket);
+          attachWorldView(rawBot, socket, botInstance);
         }
       };
       rawBot.once('spawn', onSpawn);
@@ -703,7 +721,7 @@ export function setupBotViewer(
     } else {
       // Simulation mode or stopped: stream position updates from BotInstance state
       const sendSimPosition = () => {
-        const p = botInstance.position;
+        const p = botInstance.position || { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 };
         socket.emit('position', {
           pos: { x: p.x, y: p.y, z: p.z },
           yaw: p.yaw,
@@ -720,7 +738,7 @@ export function setupBotViewer(
     }
   });
 
-  function attachWorldView(rawBot: any, socket: any) {
+  function attachWorldView(rawBot: any, socket: any, botInstance: any) {
     try {
       const { WorldView } = require('prismarine-viewer/viewer');
       const viewDistance = 4; // Low memory footprint view distance for container stability
@@ -744,8 +762,14 @@ export function setupBotViewer(
       rawBot.on('move', botPosition);
       botPosition();
 
+      // Keep position synced regularly
+      const syncInterval = setInterval(() => {
+        botPosition();
+      }, 150);
+
       socket.on('disconnect', () => {
         try {
+          clearInterval(syncInterval);
           rawBot.removeListener('move', botPosition);
           worldView.removeListenersFromBot(rawBot);
         } catch {}
