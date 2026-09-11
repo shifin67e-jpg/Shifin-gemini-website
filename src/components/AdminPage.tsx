@@ -18,6 +18,10 @@ import {
   Activity,
   Sparkles,
   Eye,
+  Globe,
+  ExternalLink,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { AdminAccountInfo, User } from '../types';
 
@@ -42,6 +46,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [tunnelInfo, setTunnelInfo] = useState<{
+    cloudflareUrl: string | null;
+    localtunnelUrl: string | null;
+    serveoUrl: string | null;
+    primaryUrl: string | null;
+  } | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const token = localStorage.getItem('ninimo_token') || '';
 
@@ -72,6 +83,17 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       if (typeof data.globalBotLimit === 'number') {
         setGlobalBotLimit(data.globalBotLimit);
         setNewLimitInput(String(data.globalBotLimit));
+      }
+
+      // Also query live tunnel info
+      try {
+        const tunnelRes = await fetch('/api/tunnel');
+        if (tunnelRes.ok) {
+          const tData = await tunnelRes.json();
+          setTunnelInfo(tData);
+        }
+      } catch {
+        // non-blocking
       }
     } catch (err: any) {
       setError(err.message || 'Error loading admin data');
@@ -307,6 +329,118 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           </p>
         </div>
       </div>
+
+      {/* Live Public Access & Tunnels Card */}
+      {tunnelInfo && (
+        <div className="bg-zinc-900 border border-emerald-500/30 rounded-2xl p-5 shadow-xl relative overflow-hidden">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800 pb-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                <Globe className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  Live Public Web Access & Tunnels
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                </h3>
+                <p className="text-xs text-zinc-400">
+                  Direct zero-prompt public URLs for connecting to your Ninimo 24/7 web panel remotely.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3.5">
+            {/* Cloudflare Tunnel (Zero Password) */}
+            <div className="p-3.5 bg-zinc-950 border border-emerald-500/40 rounded-xl space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Primary Link (Cloudflare Zero-Prompt)
+                </span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold">
+                  No Password Required
+                </span>
+              </div>
+              <div className="flex items-center gap-2 bg-zinc-900 p-2 rounded-lg border border-zinc-800">
+                <span className="text-xs font-mono text-zinc-200 truncate flex-1 select-all">
+                  {tunnelInfo.cloudflareUrl || 'Initializing direct edge tunnel...'}
+                </span>
+                {tunnelInfo.cloudflareUrl && (
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(tunnelInfo.cloudflareUrl || '');
+                        setCopiedKey('cf');
+                        setTimeout(() => setCopiedKey(null), 2500);
+                      }}
+                      className="p-1.5 rounded-md hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
+                      title="Copy URL"
+                    >
+                      {copiedKey === 'cf' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                    <a
+                      href={tunnelInfo.cloudflareUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-1.5 rounded-md hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
+                      title="Open Link"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  </div>
+                )}
+              </div>
+              <p className="text-[11px] text-zinc-400">
+                Opens directly in any browser with zero interstitial screens or safety pages.
+              </p>
+            </div>
+
+            {/* Localtunnel Backup */}
+            <div className="p-3.5 bg-zinc-950 border border-zinc-800 rounded-xl space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-zinc-300 flex items-center gap-1.5">
+                  <Activity className="w-3.5 h-3.5 text-blue-400" />
+                  Backup Link (Localtunnel Subdomain)
+                </span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 font-bold">
+                  Subdomain Backup
+                </span>
+              </div>
+              <div className="flex items-center gap-2 bg-zinc-900 p-2 rounded-lg border border-zinc-800">
+                <span className="text-xs font-mono text-zinc-300 truncate flex-1 select-all">
+                  {tunnelInfo.localtunnelUrl || 'https://ninimo-afk.loca.lt'}
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(tunnelInfo.localtunnelUrl || 'https://ninimo-afk.loca.lt');
+                      setCopiedKey('lt');
+                      setTimeout(() => setCopiedKey(null), 2500);
+                    }}
+                    className="p-1.5 rounded-md hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
+                    title="Copy URL"
+                  >
+                    {copiedKey === 'lt' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
+                  <a
+                    href={tunnelInfo.localtunnelUrl || 'https://ninimo-afk.loca.lt'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-1.5 rounded-md hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
+                    title="Open Link"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                </div>
+              </div>
+              <p className="text-[11px] text-zinc-500">
+                Custom subdomain fallback. If prompted for password, enter your Railway deployment IP.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Search & Account Directory */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 shadow-xl space-y-4">
