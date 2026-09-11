@@ -817,11 +817,16 @@ export default function App() {
 
         {/* Authenticated View vs Guest Security Gateway with Live Bot Profiles & Online Counter */}
         {!currentUser && !isAuthChecking ? (
-          <div className="py-2 sm:py-4">
+          <div className="py-1 sm:py-2">
             <LivePlatformCounter
               publicStats={publicStats}
               onSignUp={() => openAuth('signup')}
               onSignIn={() => openAuth('login')}
+              onAuthSuccess={(user, _token) => {
+                setCurrentUser(user);
+                showToast(`Welcome, ${user.username}!`);
+                refreshBots();
+              }}
             />
           </div>
         ) : currentUser && showAdminPage && currentUser.isAdmin ? (

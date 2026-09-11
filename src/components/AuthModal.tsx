@@ -129,7 +129,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           )}
         </div>
 
-        {/* Tab switchers with fluid spring layout pill */}
+        {/* Tab switchers with crisp zero-lag active indicator */}
         <div className="px-4 sm:px-6 pt-4 sm:pt-5">
           <div className="grid grid-cols-2 p-1 sm:p-1.5 bg-zinc-950 border border-zinc-800 rounded-xl sm:rounded-2xl relative">
             <button
@@ -138,19 +138,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 setMode('login');
                 setError(null);
               }}
-              className={`py-2 sm:py-2.5 text-xs font-bold rounded-lg sm:rounded-xl transition-colors relative z-10 flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer ${
-                mode === 'login' ? 'text-white' : 'text-zinc-400 hover:text-zinc-200'
+              className={`py-2 sm:py-2.5 text-xs font-bold rounded-lg sm:rounded-xl transition-all duration-150 relative z-10 flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer select-none ${
+                mode === 'login'
+                  ? 'bg-zinc-800 text-white border border-emerald-500/50 shadow-sm text-emerald-300'
+                  : 'text-zinc-400 hover:text-zinc-200'
               }`}
             >
-              <Lock className="w-3.5 h-3.5" />
+              <Lock className={`w-3.5 h-3.5 ${mode === 'login' ? 'text-emerald-400' : 'text-zinc-500'}`} />
               <span>Sign In</span>
-              {mode === 'login' && (
-                <motion.div
-                  layoutId="auth-tab-pill"
-                  className="absolute inset-0 bg-zinc-800 border border-emerald-500/30 rounded-lg sm:rounded-xl -z-10 shadow-sm shadow-emerald-950/40"
-                  transition={{ type: 'spring', bounce: 0.25, duration: 0.35 }}
-                />
-              )}
             </button>
 
             <button
@@ -159,38 +154,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 setMode('signup');
                 setError(null);
               }}
-              className={`py-2 sm:py-2.5 text-xs font-bold rounded-lg sm:rounded-xl transition-colors relative z-10 flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer ${
-                mode === 'signup' ? 'text-white' : 'text-zinc-400 hover:text-zinc-200'
+              className={`py-2 sm:py-2.5 text-xs font-bold rounded-lg sm:rounded-xl transition-all duration-150 relative z-10 flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer select-none ${
+                mode === 'signup'
+                  ? 'bg-zinc-800 text-white border border-emerald-500/50 shadow-sm text-emerald-300'
+                  : 'text-zinc-400 hover:text-zinc-200'
               }`}
             >
-              <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+              <Sparkles className={`w-3.5 h-3.5 ${mode === 'signup' ? 'text-emerald-400' : 'text-zinc-500'}`} />
               <span>Create Account</span>
-              {mode === 'signup' && (
-                <motion.div
-                  layoutId="auth-tab-pill"
-                  className="absolute inset-0 bg-zinc-800 border border-emerald-500/30 rounded-lg sm:rounded-xl -z-10 shadow-sm shadow-emerald-950/40"
-                  transition={{ type: 'spring', bounce: 0.25, duration: 0.35 }}
-                />
-              )}
             </button>
           </div>
         </div>
 
         {/* Form with optimized snug padding */}
         <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-3 sm:space-y-4">
-          <AnimatePresence mode="wait">
-            {error && (
-              <motion.div
-                initial={{ opacity: 0, y: -6, height: 0 }}
-                animate={{ opacity: 1, y: 0, height: 'auto' }}
-                exit={{ opacity: 0, y: -6, height: 0 }}
-                className="p-2.5 sm:p-3 bg-rose-500/10 border border-rose-500/20 text-rose-300 rounded-xl sm:rounded-2xl text-xs flex items-center gap-2 font-medium"
-              >
-                <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
-                <span>{error}</span>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          {error && (
+            <div className="p-2.5 sm:p-3 bg-rose-500/15 border border-rose-500/30 text-rose-300 rounded-xl sm:rounded-2xl text-xs flex items-center gap-2 font-medium animate-in fade-in duration-150">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+              <span>{error}</span>
+            </div>
+          )}
 
           {/* Username */}
           <div>
@@ -213,33 +196,25 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
           </div>
 
-          {/* Email (Signup only with smooth accordion entry) */}
-          <AnimatePresence>
-            {mode === 'signup' && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                transition={{ duration: 0.2 }}
-                className="overflow-hidden"
-              >
-                <label className="block text-xs font-semibold text-zinc-300 mb-1">
-                  Email Address
-                </label>
-                <div className="relative">
-                  <Mail className="w-4 h-4 text-zinc-500 absolute left-3.5 top-3 pointer-events-none" />
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="name@example.com"
-                    required={mode === 'signup'}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-3.5 py-2.5 text-base sm:text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors font-sans"
-                  />
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          {/* Email (Signup only) */}
+          {mode === 'signup' && (
+            <div className="animate-in fade-in duration-150">
+              <label className="block text-xs font-semibold text-zinc-300 mb-1">
+                Email Address
+              </label>
+              <div className="relative">
+                <Mail className="w-4 h-4 text-zinc-500 absolute left-3.5 top-3 pointer-events-none" />
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="name@example.com"
+                  required={mode === 'signup'}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-3.5 py-2.5 text-base sm:text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors font-sans"
+                />
+              </div>
+            </div>
+          )}
 
           {/* Password */}
           <div>

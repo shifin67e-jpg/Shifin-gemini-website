@@ -2,11 +2,8 @@ import express from 'express';
 import http from 'http';
 import path from 'path';
 import fs from 'fs';
-import { exec } from 'child_process';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
-import localtunnel from 'localtunnel';
-import { bin as cloudflaredBin, install as installCloudflared, Tunnel as CloudflaredTunnel } from 'cloudflared';
 import { botManager } from './server/botManager.js';
 import { authManager } from './server/auth.js';
 
@@ -637,19 +634,12 @@ async function startServer() {
     });
   });
 
-  // Tunnel status endpoint for dashboard
-  let publicCloudflareUrl: string | null = null;
-  let publicServeoUrl: string = `https://${(process.env.SERVEO_SUBDOMAIN || 'Ninimo-AFK').toLowerCase()}.serveo.net`;
-  let publicLocaltunnelUrl: string | null = null;
-
+  // Standard web info endpoint
   app.get('/api/tunnel', (req, res) => {
     res.json({
-      cloudflareUrl: publicCloudflareUrl,
-      serveoUrl: publicServeoUrl,
-      localtunnelUrl: publicLocaltunnelUrl,
-      primaryUrl: publicCloudflareUrl || publicLocaltunnelUrl || publicServeoUrl,
-      subdomain: process.env.SERVEO_SUBDOMAIN || 'Ninimo-AFK',
       port: PORT,
+      status: 'active',
+      railwayDomain: process.env.RAILWAY_PUBLIC_DOMAIN || null,
     });
   });
 
@@ -678,158 +668,9 @@ async function startServer() {
     });
   }
 
-  // Cloudflare Quick Tunnel: 100% direct access with ZERO safety pages and ZERO passwords
-  async function initCloudflareTunnel(port: number) {
-    console.log(`[Cloudflare Tunnel] Starting zero-prompt tunnel for port ${port}...`);
-    try {
-      if (!fs.existsSync(cloudflaredBin)) {
-        console.log('[Cloudflare Tunnel] Downloading cloudflared binary...');
-        await installCloudflared(cloudflaredBin);
-      }
-
-      const t = CloudflaredTunnel.quick(`http://localhost:${port}`);
-
-      t.on('url', (url: string) => {
-        publicCloudflareUrl = url;
-        console.log('\n' + '='.repeat(68));
-        console.log('🌟 DIRECT ZERO-PROMPT WEB ACCESS URL (NO SAFETY PAGE, NO PASSWORD):');
-        console.log(`👉 ${url}`);
-        console.log('='.repeat(68));
-        console.log('💡 Click to open directly! No password prompt, no safety reminder.');
-        console.log('💡 High-speed global connection powered by Cloudflare edge.');
-        console.log('💡 Mineflayer 24/7 bot is running continuously in the background.');
-        console.log('='.repeat(68) + '\n');
-      });
-
-      t.on('error', (err: any) => {
-        console.warn('[Cloudflare Tunnel Notice]:', err?.message || err);
-      });
-
-      t.on('exit', (code: number | null) => {
-        console.log(`[Cloudflare Tunnel] Tunnel closed (${code}). Reconnecting in 5s...`);
-        publicCloudflareUrl = null;
-        setTimeout(() => initCloudflareTunnel(port), 5000);
-      });
-    } catch (err: any) {
-      console.warn(`[Cloudflare Tunnel Init]: ${err?.message || err}. Retrying in 10s...`);
-      setTimeout(() => initCloudflareTunnel(port), 10000);
-    }
-  }
-
-  // Serveo SSH Tunnel: tunnels port PORT to https://Ninimo-AFK.serveo.net using child_process.exec
-  let serveoProcess: any = null;
-  function initServeoTunnel(port: number) {
-    const rawSubdomain = (process.env.SERVEO_SUBDOMAIN || 'Ninimo-AFK').trim();
-    // Subdomains in DNS/HTTP are lowercase
-    const subdomain = rawSubdomain.toLowerCase();
-    const publicUrl = `https://${subdomain}.serveo.net`;
-    publicServeoUrl = publicUrl;
-
-    const sshCommand = `ssh -N -T -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -R ${subdomain}:80:localhost:${port} serveo.net`;
-
-    console.log('\n' + '-'.repeat(68));
-    console.log(`[Serveo] Attempting custom subdomain tunnel: ${publicUrl}`);
-    console.log('-'.repeat(68) + '\n');
-
-    try {
-      serveoProcess = exec(sshCommand, (error, stdout, stderr) => {
-        if (error) {
-          const errDetail = (stderr || stdout || error.message || '').trim();
-          console.warn(`[Serveo Notice]: Tunnel ended (${errDetail || error.message}). (Note: If Serveo shows its homepage, use the Cloudflare URL above).`);
-        }
-      });
-
-      serveoProcess.stdout?.on('data', (data: any) => {
-        const text = data.toString().trim();
-        if (text) console.log(`[Serveo]: ${text}`);
-      });
-
-      serveoProcess.stderr?.on('data', (data: any) => {
-        const text = data.toString().trim();
-        if (text) console.log(`[Serveo]: ${text}`);
-      });
-
-      serveoProcess.on('close', (code: number) => {
-        serveoProcess = null;
-        setTimeout(() => initServeoTunnel(port), 10000);
-      });
-
-      serveoProcess.on('error', (err: any) => {
-        console.warn(`[Serveo SSH Launch Warning]: ${err?.message || err}`);
-      });
-    } catch (err: any) {
-      setTimeout(() => initServeoTunnel(port), 15000);
-    }
-  }
-
-  // Localtunnel fallback manager (spawns automatically alongside Cloudflare)
-  async function initLocaltunnel(port: number) {
-    const preferredSubdomain = process.env.LOCALTUNNEL_SUBDOMAIN?.trim() || 'ninimo-afk';
-    try {
-      const ltFn: any = typeof localtunnel === 'function' ? localtunnel : (localtunnel as any).default;
-      if (!ltFn) return;
-
-      const tunnel = await ltFn(port, {
-        subdomain: preferredSubdomain || undefined,
-      });
-
-      publicLocaltunnelUrl = tunnel.url;
-
-      // Automatically fetch the server's public IP to print as the tunnel password
-      let tunnelPassword = 'Check your panel IP';
-      try {
-        const ipRes = await fetch('https://loca.lt/mytunnelpassword', { signal: AbortSignal.timeout(4000) });
-        if (ipRes.ok) {
-          tunnelPassword = (await ipRes.text()).trim();
-        }
-      } catch {
-        try {
-          const ipRes2 = await fetch('https://api.ipify.org', { signal: AbortSignal.timeout(4000) });
-          if (ipRes2.ok) {
-            tunnelPassword = (await ipRes2.text()).trim();
-          }
-        } catch {}
-      }
-
-      console.log('\n' + '='.repeat(68));
-      console.log('⚡ BACKUP TUNNEL READY (LOCALTUNNEL):');
-      console.log(`👉 ${tunnel.url}`);
-      console.log(`🔑 LOCALTUNNEL PASSWORD (IF ASKED): ${tunnelPassword}`);
-      console.log('💡 TIP: Use the Cloudflare URL above to skip passwords completely!');
-      console.log('='.repeat(68) + '\n');
-
-      tunnel.on('close', () => {
-        publicLocaltunnelUrl = null;
-        setTimeout(() => initLocaltunnel(port), 5000);
-      });
-
-      tunnel.on('error', (err: any) => {
-        console.warn('[Localtunnel Warning]:', err?.message || err);
-      });
-    } catch (err: any) {
-      console.warn(`[Localtunnel Notice]: ${err?.message || err}`);
-      setTimeout(() => initLocaltunnel(port), 15000);
-    }
-  }
-
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`Ninimo 24/7 server running on http://0.0.0.0:${PORT}`);
 
-    // Launch zero-prompt Cloudflare Quick Tunnel (no password, no safety page)
-    initCloudflareTunnel(PORT);
-
-    // Launch custom Serveo SSH tunnel
-    const enableServeo = process.env.ENABLE_SERVEO !== 'false';
-    if (enableServeo) {
-      initServeoTunnel(PORT);
-    }
-
-    // Launch Localtunnel backup
-    const enableLocaltunnel = process.env.ENABLE_LOCALTUNNEL !== 'false';
-    if (enableLocaltunnel) {
-      initLocaltunnel(PORT);
-    }
-    
     // Server-wide memory watchdog: prevents Cloud Run container OOM kills
     setInterval(() => {
       try {
