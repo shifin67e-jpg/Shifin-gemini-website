@@ -12,13 +12,13 @@ export const PlayersWidget: React.FC<PlayersWidgetProps> = ({ players, botUserna
       <div className="flex items-center justify-between border-b border-zinc-800 pb-2.5">
         <div className="flex items-center gap-2 text-xs font-semibold text-zinc-300">
           <Users className="w-4 h-4 text-blue-400" />
-          <span>Players in Range ({players.length})</span>
+          <span>Players in Server ({players.length})</span>
         </div>
       </div>
 
       {players.length === 0 ? (
         <div className="py-4 text-center text-xs text-zinc-500 font-sans">
-          No players detected nearby
+          No players detected on server
         </div>
       ) : (
         <div className="flex flex-wrap gap-2">

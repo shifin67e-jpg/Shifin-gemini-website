@@ -58,10 +58,11 @@ export const NetherPortalCalculator: React.FC<NetherPortalCalculatorProps> = ({
     }
   };
 
+  const initializedRef = React.useRef(false);
   useEffect(() => {
-    if (isOpen && activeBot) {
-      // Default to bot position on first open if bot has valid position
-      if (activeBot.position.x !== 0 || activeBot.position.z !== 0) {
+    if (isOpen && !initializedRef.current) {
+      initializedRef.current = true;
+      if (activeBot && (activeBot.position.x !== 0 || activeBot.position.z !== 0)) {
         setX(Math.round(activeBot.position.x));
         setY(Math.round(activeBot.position.y));
         setZ(Math.round(activeBot.position.z));
@@ -71,8 +72,10 @@ export const NetherPortalCalculator: React.FC<NetherPortalCalculatorProps> = ({
           setDirection('overworld_to_nether');
         }
       }
+    } else if (!isOpen) {
+      initializedRef.current = false;
     }
-  }, [isOpen, activeBot]);
+  }, [isOpen, activeBot?.id]);
 
   if (!isOpen) return null;
 
@@ -97,20 +100,20 @@ export const NetherPortalCalculator: React.FC<NetherPortalCalculatorProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 overflow-y-auto">
       <motion.div
         id="nether-portal-modal"
-        initial={{ opacity: 0, scale: 0.94, y: 15 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.94, y: 15 }}
-        transition={{ type: 'spring', damping: 25, stiffness: 350 }}
-        className="bg-zinc-900 border border-purple-500/30 rounded-3xl w-full max-w-2xl max-h-[92vh] overflow-y-auto shadow-2xl flex flex-col relative my-auto"
+        initial={{ opacity: 0, scale: 0.96 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.96 }}
+        transition={{ duration: 0.16, ease: 'easeOut' }}
+        className="bg-zinc-900 border border-purple-500/30 rounded-3xl w-full max-w-2xl max-h-[90dvh] overflow-y-auto shadow-2xl flex flex-col relative my-auto transform-gpu will-change-transform"
       >
-        {/* Decorative ambient obsidian glow */}
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-4/5 h-28 bg-purple-600/15 blur-3xl pointer-events-none" />
+        {/* Subtle ambient obsidian accent */}
+        <div className="absolute top-0 left-0 right-0 h-16 bg-gradient-to-b from-purple-500/10 to-transparent pointer-events-none rounded-t-3xl" />
 
         {/* Modal Header */}
-        <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-950/80 flex items-center justify-between relative z-10">
+        <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-950/90 flex items-center justify-between relative z-10">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-center text-purple-300 shadow-md shadow-purple-950/50">
               <Sparkles className="w-5 h-5 animate-pulse" />

@@ -327,11 +327,12 @@ export class BotInstance extends EventEmitter {
         }
 
         const myUsername = (this.config.username || '').trim().toLowerCase();
-        const isFromBot = sender && sender.toLowerCase() === myUsername;
+        const isFromBot = (sender && sender.toLowerCase() === myUsername) ||
+                          (myUsername && cleanText.toLowerCase().includes(myUsername));
 
         // If the server is broadcasting back what this bot just sent, avoid duplicate entry
         if (isFromBot) {
-          const recentSelf = this.chatHistory.slice(-6).reverse().find(
+          const recentSelf = this.chatHistory.slice(-10).reverse().find(
             (m) => m.type === 'bot_sent' && (cleanText.includes(m.text) || m.text.includes(contentText))
           );
           if (recentSelf) {
@@ -340,7 +341,9 @@ export class BotInstance extends EventEmitter {
         }
 
         let type: ChatMessage['type'] = 'chat';
-        if (sender) {
+        if (isFromBot) {
+          type = 'bot_sent';
+        } else if (sender) {
           type = 'chat';
         } else if (cleanText.toLowerCase().includes('whispers') || cleanText.includes('->') || cleanText.toLowerCase().includes('msg')) {
           type = 'whisper';
@@ -396,14 +399,14 @@ export class BotInstance extends EventEmitter {
     }
 
     if (this.bot.players) {
-      this.playersNearby = Object.keys(this.bot.players).slice(0, 15);
+      this.playersNearby = Object.keys(this.bot.players).slice(0, 100);
     }
   }
 
   private startAfkLoop() {
     this.stopAfkLoop();
     const intervalMs = Math.max(5, this.config.antiAfk.intervalSeconds || 30) * 1000;
-    this.addLog('info', 'Anti-AFK', `Anti-AFK enabled: will perform movement routine every ${this.config.antiAfk.intervalSeconds}s.`);
+    this.addLog('info', 'Anti-AFK', `Anti-AFK active: routine scheduled every ${this.config.antiAfk.intervalSeconds}s.`);
 
     this.afkIntervalTimer = setInterval(() => {
       this.performAntiAfkAction();
@@ -422,13 +425,12 @@ export class BotInstance extends EventEmitter {
     this.lastAfkActionTime = Date.now();
 
     if ((this.config as any).simulationMode) {
-      // Simulate left-right strafe
+      // Simulate left-right strafe silently without flooding chat
       const origX = this.position.x;
       this.position.x = Math.round((origX - 0.2) * 10) / 10;
       this.emitUpdate();
       setTimeout(() => {
         this.position.x = origX;
-        this.addLog('info', 'Anti-AFK', `Performed Anti-AFK strafe left/right (Returned to ${this.position.x}, ${this.position.y}, ${this.position.z})`);
         this.emitUpdate();
       }, 500);
       return;
@@ -499,10 +501,10 @@ export class BotInstance extends EventEmitter {
         }).catch(() => {});
       }
 
-      this.addLog('info', 'Anti-AFK', `Executed Anti-AFK routine (strafe L/R + position preserved at ${this.position.x}, ${this.position.y}, ${this.position.z})`);
+      // Keep telemetry updated without spamming chat console
       this.emitUpdate();
     } catch (err: any) {
-      this.addLog('error', 'Anti-AFK', `Anti-AFK routine error: ${err.message}`);
+      // Only log if an unexpected fatal error occurs
     }
   }
 

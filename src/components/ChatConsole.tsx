@@ -95,33 +95,33 @@ export const ChatConsole: React.FC<ChatConsoleProps> = ({
   return (
     <div id="chat-console" className="bg-zinc-900 border border-zinc-800 rounded-2xl flex flex-col h-[520px] shadow-xl overflow-hidden">
       {/* Header */}
-      <div className="p-3.5 bg-zinc-950/80 border-b border-zinc-800 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+      <div className="p-3 bg-zinc-950/90 border-b border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
             <Terminal className="w-4 h-4" />
           </div>
-          <div>
-            <h3 className="font-bold text-xs text-white flex items-center gap-2">
-              Minecraft Live Chat & Command Console
-              {isOnline ? (
-                <span className="inline-flex items-center gap-1.5 text-[10px] text-emerald-400 font-bold bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-full">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  CONNECTED
-                </span>
-              ) : botStatus === 'starting' ? (
-                <span className="inline-flex items-center gap-1.5 text-[10px] text-blue-400 font-bold bg-blue-500/15 border border-blue-500/30 px-2 py-0.5 rounded-full">
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-spin" />
-                  CONNECTING...
-                </span>
-              ) : (
-                <span className="text-[10px] text-zinc-500 font-medium">OFFLINE</span>
-              )}
+          <div className="min-w-0 flex items-center gap-2 flex-wrap">
+            <h3 className="font-bold text-xs text-white truncate">
+              Minecraft Live Chat & Console
             </h3>
+            {isOnline ? (
+              <span className="inline-flex items-center gap-1.5 text-[10px] text-emerald-400 font-bold bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-full shrink-0">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                ONLINE
+              </span>
+            ) : botStatus === 'starting' ? (
+              <span className="inline-flex items-center gap-1.5 text-[10px] text-blue-400 font-bold bg-blue-500/15 border border-blue-500/30 px-2 py-0.5 rounded-full shrink-0">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-spin" />
+                CONNECTING...
+              </span>
+            ) : (
+              <span className="text-[10px] text-zinc-500 font-medium shrink-0">OFFLINE</span>
+            )}
           </div>
         </div>
 
         {/* Filter buttons and Clear action */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0 w-full sm:w-auto">
           <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-xl p-1 text-[11px] relative">
             {(['all', 'chat', 'system'] as const).map((tab) => (
               <button
@@ -143,18 +143,18 @@ export const ChatConsole: React.FC<ChatConsoleProps> = ({
             ))}
           </div>
 
-          {onClearChat && (
-            <motion.button
-              whileHover={{ scale: 1.08 }}
-              whileTap={{ scale: 0.92 }}
-              onClick={onClearChat}
-              className="p-1.5 bg-zinc-900 hover:bg-rose-950/40 text-zinc-400 hover:text-rose-300 border border-zinc-800 hover:border-rose-500/40 rounded-xl text-xs transition-colors cursor-pointer"
-              title="Clear Console History"
-              aria-label="Clear Console"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-            </motion.button>
-          )}
+          <motion.button
+            id="btn-clear-chat-console"
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => onClearChat && onClearChat()}
+            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 hover:bg-rose-950/60 text-zinc-300 hover:text-rose-200 border border-zinc-800 hover:border-rose-500/50 rounded-xl text-xs font-semibold transition-all cursor-pointer shadow-sm"
+            title="Clear Console History"
+            aria-label="Clear Console"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+            <span className="text-[11px] font-medium">Clear</span>
+          </motion.button>
         </div>
       </div>
 
@@ -277,18 +277,31 @@ export const ChatConsole: React.FC<ChatConsoleProps> = ({
           </motion.button>
         ))}
 
-        {onOpenQuickMessagesSettings && (
+        <div className="flex items-center gap-1.5 ml-auto shrink-0">
+          {onOpenQuickMessagesSettings && (
+            <motion.button
+              whileHover={{ scale: 1.12, rotate: 45 }}
+              whileTap={{ scale: 0.92 }}
+              type="button"
+              onClick={onOpenQuickMessagesSettings}
+              className="p-1 text-zinc-500 hover:text-sky-300 hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
+              title="Customize Quick Messages in Settings"
+            >
+              <Sliders className="w-3.5 h-3.5" />
+            </motion.button>
+          )}
+
           <motion.button
-            whileHover={{ scale: 1.12, rotate: 45 }}
+            whileHover={{ scale: 1.12 }}
             whileTap={{ scale: 0.92 }}
             type="button"
-            onClick={onOpenQuickMessagesSettings}
-            className="shrink-0 p-1 text-zinc-500 hover:text-sky-300 hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer ml-auto"
-            title="Customize Quick Messages in Settings"
+            onClick={() => onClearChat && onClearChat()}
+            className="p-1 text-zinc-500 hover:text-rose-400 hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
+            title="Clear Console Messages"
           >
-            <Sliders className="w-3 h-3" />
+            <Trash2 className="w-3.5 h-3.5" />
           </motion.button>
-        )}
+        </div>
       </div>
 
       {/* Chat Input Bar with motion button */}
