@@ -26,6 +26,7 @@ interface BotHudProps {
   onEdit: (bot: BotState) => void;
   onDelete: (id: string) => void;
   onToggleAntiAfk: (id: string, enabled: boolean) => void;
+  onOpenNetherCalc?: () => void;
   isAdmin?: boolean;
 }
 
@@ -37,6 +38,7 @@ export const BotHud: React.FC<BotHudProps> = ({
   onEdit,
   onDelete,
   onToggleAntiAfk,
+  onOpenNetherCalc,
   isAdmin,
 }) => {
   const [avatarError, setAvatarError] = useState(false);
@@ -343,10 +345,22 @@ export const BotHud: React.FC<BotHudProps> = ({
         </div>
 
         {/* Coordinates */}
-        <div className="bg-zinc-950/50 border border-zinc-800/70 rounded-xl p-3">
-          <div className="flex items-center gap-1.5 text-zinc-400 text-xs mb-1">
-            <Compass className="w-3.5 h-3.5 text-purple-400" />
-            <span>Location</span>
+        <div className="bg-zinc-950/50 border border-zinc-800/70 rounded-xl p-3 flex flex-col justify-between">
+          <div className="flex items-center justify-between gap-1 text-zinc-400 text-xs mb-1">
+            <div className="flex items-center gap-1.5">
+              <Compass className="w-3.5 h-3.5 text-purple-400" />
+              <span className="font-semibold text-zinc-300">Coordinates</span>
+            </div>
+            {onOpenNetherCalc && (
+              <button
+                type="button"
+                onClick={onOpenNetherCalc}
+                className="text-[10px] text-purple-400 hover:text-purple-300 font-semibold flex items-center gap-0.5 cursor-pointer hover:underline"
+                title="Open coordinates in Nether Portal Calculator"
+              >
+                <span>Calc Portal</span>
+              </button>
+            )}
           </div>
           <p className="text-xs font-mono font-bold text-zinc-200 truncate">
             {Math.round(bot.position.x)}, {Math.round(bot.position.y)}, {Math.round(bot.position.z)}

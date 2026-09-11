@@ -10,6 +10,8 @@ import {
   ArrowLeftRight,
   Layers,
   Sparkles,
+  Compass,
+  Sliders,
 } from 'lucide-react';
 import { GlobalStats, PublicPlatformStats, User } from '../types';
 import { NinimoIcon } from './NinimoIcon';
@@ -27,6 +29,8 @@ interface NavbarProps {
   onAddNewBot: () => void;
   onOpenAuth: () => void;
   onLogout: () => void;
+  onOpenNetherCalc?: () => void;
+  onOpenDefaults?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -42,6 +46,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   onAddNewBot,
   onOpenAuth,
   onLogout,
+  onOpenNetherCalc,
+  onOpenDefaults,
 }) => {
   return (
     <header className="sticky top-0 z-30 bg-zinc-950/90 backdrop-blur-md border-b border-zinc-800/80 px-2.5 sm:px-4 lg:px-8 py-2.5 sm:py-3 w-full">

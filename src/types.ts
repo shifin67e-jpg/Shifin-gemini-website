@@ -122,3 +122,22 @@ export interface GlobalStats {
 export interface PublicPlatformStats {
   activeBotsOnline: number;
 }
+
+export interface QuickCommandItem {
+  id: string;
+  label: string;
+  cmd: string;
+}
+
+export interface BotDefaults {
+  host: string;
+  port: number;
+  onJoinCommand: string;
+  onJoinDelayMs: number;
+  auth: AuthType;
+  version: string;
+  autoReconnect: boolean;
+  reconnectDelaySeconds: number;
+  antiAfk: AntiAfkConfig;
+  quickCommands?: QuickCommandItem[];
+}

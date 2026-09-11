@@ -10,13 +10,14 @@ import {
   Shield,
   Crown,
 } from 'lucide-react';
-import { BotConfig, BotState } from '../types';
+import { BotConfig, BotState, BotDefaults } from '../types';
 
 interface BotModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (data: Partial<BotConfig>) => Promise<void>;
   initialBot?: BotState | null;
+  userDefaults?: BotDefaults | null;
 }
 
 export const BotModal: React.FC<BotModalProps> = ({
@@ -24,20 +25,21 @@ export const BotModal: React.FC<BotModalProps> = ({
   onClose,
   onSave,
   initialBot,
+  userDefaults,
 }) => {
   const [formData, setFormData] = useState<Partial<BotConfig>>({
     name: 'NinimoBot',
-    host: 'play.hypixel.net',
-    port: 25565,
+    host: userDefaults?.host || 'play.hypixel.net',
+    port: userDefaults?.port || 25565,
     username: 'NinimoBot',
-    auth: 'offline',
+    auth: userDefaults?.auth || 'offline',
     password: '',
-    version: '',
-    autoReconnect: true,
-    reconnectDelaySeconds: 5,
-    onJoinCommand: '',
-    onJoinDelayMs: 2000,
-    antiAfk: {
+    version: userDefaults?.version || '',
+    autoReconnect: userDefaults?.autoReconnect ?? true,
+    reconnectDelaySeconds: userDefaults?.reconnectDelaySeconds || 5,
+    onJoinCommand: userDefaults?.onJoinCommand || '',
+    onJoinDelayMs: userDefaults?.onJoinDelayMs || 2000,
+    antiAfk: userDefaults?.antiAfk || {
       enabled: true,
       intervalSeconds: 30,
       movementType: 'strafe_lr',
@@ -47,7 +49,7 @@ export const BotModal: React.FC<BotModalProps> = ({
     },
   });
 
-  const [portInput, setPortInput] = useState<string>('25565');
+  const [portInput, setPortInput] = useState<string>(String(userDefaults?.port || 25565));
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -57,17 +59,17 @@ export const BotModal: React.FC<BotModalProps> = ({
     } else {
       setFormData({
         name: 'NinimoBot',
-        host: 'play.hypixel.net',
-        port: 25565,
+        host: userDefaults?.host || 'play.hypixel.net',
+        port: userDefaults?.port || 25565,
         username: 'NinimoBot',
-        auth: 'offline',
+        auth: userDefaults?.auth || 'offline',
         password: '',
-        version: '',
-        autoReconnect: true,
-        reconnectDelaySeconds: 5,
-        onJoinCommand: '',
-        onJoinDelayMs: 2000,
-        antiAfk: {
+        version: userDefaults?.version || '',
+        autoReconnect: userDefaults?.autoReconnect ?? true,
+        reconnectDelaySeconds: userDefaults?.reconnectDelaySeconds || 5,
+        onJoinCommand: userDefaults?.onJoinCommand || '',
+        onJoinDelayMs: userDefaults?.onJoinDelayMs || 2000,
+        antiAfk: userDefaults?.antiAfk || {
           enabled: true,
           intervalSeconds: 30,
           movementType: 'strafe_lr',
@@ -76,9 +78,9 @@ export const BotModal: React.FC<BotModalProps> = ({
           sneakWiggle: true,
         },
       });
-      setPortInput('25565');
+      setPortInput(String(userDefaults?.port || 25565));
     }
-  }, [initialBot, isOpen]);
+  }, [initialBot, isOpen, userDefaults]);
 
   if (!isOpen) return null;
 

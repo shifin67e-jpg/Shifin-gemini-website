@@ -485,6 +485,44 @@ export class BotManager extends EventEmitter {
     return bot.sendChat(message);
   }
 
+  public clearChat(userId: string, botId: string): boolean {
+    const bot = this.getUserBot(userId, botId);
+    if (!bot) return false;
+    bot.clearChatHistory();
+    this.broadcastUser(userId, 'bot_update', bot.getState());
+    return true;
+  }
+
+  public getUserDefaults(userId: string): any {
+    try {
+      const filePath = path.join(process.cwd(), 'user-defaults.json');
+      if (fs.existsSync(filePath)) {
+        const raw = fs.readFileSync(filePath, 'utf-8');
+        const data = JSON.parse(raw);
+        if (data && data[userId]) {
+          return data[userId];
+        }
+      }
+    } catch {}
+    return null;
+  }
+
+  public saveUserDefaults(userId: string, defaults: any): void {
+    try {
+      const filePath = path.join(process.cwd(), 'user-defaults.json');
+      let data: Record<string, any> = {};
+      if (fs.existsSync(filePath)) {
+        try {
+          data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        } catch {}
+      }
+      data[userId] = defaults;
+      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (err) {
+      console.error('Failed to save user-defaults.json:', err);
+    }
+  }
+
   public getUserStats(userId: string): GlobalStats {
     let totalBots = 0;
     let activeBots = 0;

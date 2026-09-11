@@ -415,6 +415,28 @@ async function startServer() {
     }
   });
 
+  // User Bot Defaults / Presets
+  app.get('/api/user/bot-defaults', requireAuth, (req, res) => {
+    const user = (req as any).user;
+    const defaults = botManager.getUserDefaults(user.id);
+    res.json({ defaults });
+  });
+
+  app.post('/api/user/bot-defaults', requireAuth, (req, res) => {
+    const user = (req as any).user;
+    botManager.saveUserDefaults(user.id, req.body);
+    res.json({ success: true, message: 'Defaults saved successfully' });
+  });
+
+  app.post('/api/bots/:id/clear-chat', requireAuth, (req, res) => {
+    const user = (req as any).user;
+    const ok = botManager.clearChat(user.id, req.params.id);
+    if (!ok) {
+      return res.status(404).json({ error: 'Bot not found or unauthorized' });
+    }
+    res.json({ success: true, message: 'Chat history cleared' });
+  });
+
   app.post('/api/bots/:id/restart', requireAuth, (req, res) => {
     const user = (req as any).user;
     const ok = botManager.restartBot(user.id, req.params.id);

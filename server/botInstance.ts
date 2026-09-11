@@ -186,15 +186,13 @@ export class BotInstance extends EventEmitter {
     if (!message || message.trim() === '') return false;
     const trimmed = message.trim();
 
-    // Log sent message
+    // Log sent message once as bot_sent
     this.addLog('bot_sent', this.config.username, trimmed);
 
     if ((this.config as any).simulationMode) {
       setTimeout(() => {
         if (trimmed.startsWith('/')) {
           this.addLog('system', 'Server', `Command executed: ${trimmed}`);
-        } else {
-          this.addLog('chat', this.config.username, trimmed);
         }
       }, 300);
       return true;
@@ -318,8 +316,31 @@ export class BotInstance extends EventEmitter {
 
         if (!cleanText.trim()) return;
 
+        // Parse possible sender: <PlayerName>, [PlayerName], or PlayerName:
+        let sender: string | undefined = undefined;
+        let contentText = cleanText;
+        const playerMatch = cleanText.match(/^[<\[]([A-Za-z0-9_]{3,16})[>\]]\s*(.*)$/) ||
+                            cleanText.match(/^([A-Za-z0-9_]{3,16}):\s*(.*)$/);
+        if (playerMatch) {
+          sender = playerMatch[1];
+          contentText = playerMatch[2] || cleanText;
+        }
+
+        const myUsername = (this.config.username || '').trim().toLowerCase();
+        const isFromBot = sender && sender.toLowerCase() === myUsername;
+
+        // If the server is broadcasting back what this bot just sent, avoid duplicate entry
+        if (isFromBot) {
+          const recentSelf = this.chatHistory.slice(-6).reverse().find(
+            (m) => m.type === 'bot_sent' && (cleanText.includes(m.text) || m.text.includes(contentText))
+          );
+          if (recentSelf) {
+            return; // Dropping duplicate server echo of own sent chat
+          }
+        }
+
         let type: ChatMessage['type'] = 'chat';
-        if (cleanText.startsWith('<') && cleanText.includes('>')) {
+        if (sender) {
           type = 'chat';
         } else if (cleanText.toLowerCase().includes('whispers') || cleanText.includes('->') || cleanText.toLowerCase().includes('msg')) {
           type = 'whisper';
@@ -327,7 +348,7 @@ export class BotInstance extends EventEmitter {
           type = 'system';
         }
 
-        this.addLog(type, undefined, cleanText, ansiHtml);
+        this.addLog(type, sender, cleanText, ansiHtml);
       } catch (err) {
         // fallback
       }
@@ -686,13 +707,18 @@ export class BotInstance extends EventEmitter {
         }
       }
 
-      // 4. Cap chat history in RAM
-      if (this.chatHistory.length > 80) {
-        this.chatHistory = this.chatHistory.slice(-60);
+      // 4. Cap chat history in RAM (generous 500 message capacity)
+      if (this.chatHistory.length > 500) {
+        this.chatHistory = this.chatHistory.slice(-450);
       }
     } catch {
       // safe no-op
     }
+  }
+
+  public clearChatHistory(): void {
+    this.chatHistory = [];
+    this.emitUpdate();
   }
 
   private addLog(type: ChatMessage['type'], sender: string | undefined, text: string, formattedHtml?: string) {
@@ -706,7 +732,7 @@ export class BotInstance extends EventEmitter {
     };
 
     this.chatHistory.push(log);
-    if (this.chatHistory.length > 80) {
+    if (this.chatHistory.length > 500) {
       this.chatHistory.shift();
     }
     this.emit('chat', log);

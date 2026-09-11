@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { BotState, GlobalStats, BotConfig, User, PublicPlatformStats } from './types';
+import { BotState, GlobalStats, BotConfig, User, PublicPlatformStats, BotDefaults } from './types';
 import { Navbar } from './components/Navbar';
 import { BotList } from './components/BotList';
 import { BotHud } from './components/BotHud';
@@ -13,6 +13,8 @@ import { PlayersWidget } from './components/PlayersWidget';
 import { AdminPage } from './components/AdminPage';
 import { LivePlatformCounter } from './components/LivePlatformCounter';
 import { TesterSwarmCommander } from './components/TesterSwarmCommander';
+import { BotDefaultsModal, FACTORY_BOT_DEFAULTS } from './components/BotDefaultsModal';
+import { NetherPortalCalculator } from './components/NetherPortalCalculator';
 import {
   Shield,
   Zap,
@@ -25,6 +27,10 @@ import {
   Info,
   ShieldAlert,
   ArrowLeftRight,
+  Terminal,
+  Compass,
+  Sliders,
+  LayoutGrid,
 } from 'lucide-react';
 
 import { getDeviceFingerprint } from './lib/fingerprint';
@@ -47,7 +53,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [editingBot, setEditingBot] = useState<BotState | null>(null);
-  const [activeMobileTab, setActiveMobileTab] = useState<'hud_chat' | 'anti_afk' | 'settings' | 'bots'>('hud_chat');
+  const [activeTab, setActiveTab] = useState<'all' | 'hud_chat' | 'anti_afk' | 'settings'>('hud_chat');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showAdminPage, setShowAdminPage] = useState(false);
   const [adminReturnToken, setAdminReturnToken] = useState<string | null>(() => {
@@ -58,6 +64,15 @@ export default function App() {
     }
   });
   const [globalBotLimit, setGlobalBotLimit] = useState<number>(1);
+  const [isNetherCalcOpen, setIsNetherCalcOpen] = useState(false);
+  const [isDefaultsOpen, setIsDefaultsOpen] = useState(false);
+  const [botDefaults, setBotDefaults] = useState<BotDefaults>(() => {
+    try {
+      const saved = localStorage.getItem('ninimo_bot_defaults');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return FACTORY_BOT_DEFAULTS;
+  });
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -399,7 +414,7 @@ export default function App() {
               prev.map((b) => {
                 if (b.id === botId) {
                   const newHistory = [...b.chatHistory, message];
-                  if (newHistory.length > 200) newHistory.shift();
+                  if (newHistory.length > 500) newHistory.shift();
                   return { ...b, chatHistory: newHistory };
                 }
                 return b;
@@ -580,6 +595,53 @@ export default function App() {
     }
   };
 
+  // Fetch bot defaults from server when currentUser logs in
+  useEffect(() => {
+    if (!currentUser) return;
+    authFetch('/api/user/bot-defaults')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.defaults) {
+          setBotDefaults(data.defaults);
+          try {
+            localStorage.setItem('ninimo_bot_defaults', JSON.stringify(data.defaults));
+          } catch {}
+        }
+      })
+      .catch(() => {});
+  }, [currentUser, authFetch]);
+
+  const handleSaveDefaults = async (newDefaults: BotDefaults) => {
+    setBotDefaults(newDefaults);
+    try {
+      localStorage.setItem('ninimo_bot_defaults', JSON.stringify(newDefaults));
+    } catch {}
+    try {
+      await authFetch('/api/user/bot-defaults', {
+        method: 'POST',
+        body: JSON.stringify(newDefaults),
+      });
+      showToast('New bot defaults saved to your account!');
+    } catch {
+      showToast('Presets saved locally');
+    }
+  };
+
+  const handleClearChat = async () => {
+    if (!activeBot) return;
+    try {
+      const res = await authFetch(`/api/bots/${activeBot.id}/clear-chat`, { method: 'POST' });
+      if (res.ok) {
+        setBots((prev) =>
+          prev.map((b) => (b.id === activeBot.id ? { ...b, chatHistory: [] } : b))
+        );
+        showToast('Console chat history cleared');
+      }
+    } catch {
+      showToast('Error clearing chat');
+    }
+  };
+
   const handleSendMessage = async (msg: string): Promise<boolean> => {
     if (!activeBot) return false;
     try {
@@ -731,6 +793,8 @@ export default function App() {
         }}
         onOpenAuth={() => openAuth('login')}
         onLogout={handleLogout}
+        onOpenNetherCalc={() => setIsNetherCalcOpen(true)}
+        onOpenDefaults={() => setIsDefaultsOpen(true)}
       />
 
       {/* Main Content Area */}
@@ -815,92 +879,228 @@ export default function App() {
               }}
             />
 
-            {/* Mobile Navigation Tabs */}
-            <div className="flex md:hidden bg-zinc-900 border border-zinc-800 rounded-2xl p-1 text-xs">
-              <button
-                onClick={() => setActiveMobileTab('hud_chat')}
-                className={`flex-1 py-2 rounded-xl font-bold transition-all ${
-                  activeMobileTab === 'hud_chat'
-                    ? 'bg-zinc-800 text-emerald-400 shadow-sm'
-                    : 'text-zinc-400'
-                }`}
-              >
-                HUD & Chat
-              </button>
-              <button
-                onClick={() => setActiveMobileTab('anti_afk')}
-                className={`flex-1 py-2 rounded-xl font-bold transition-all ${
-                  activeMobileTab === 'anti_afk'
-                    ? 'bg-zinc-800 text-emerald-400 shadow-sm'
-                    : 'text-zinc-400'
-                }`}
-              >
-                Anti-AFK
-              </button>
-              <button
-                onClick={() => setActiveMobileTab('settings')}
-                className={`flex-1 py-2 rounded-xl font-bold transition-all ${
-                  activeMobileTab === 'settings'
-                    ? 'bg-zinc-800 text-emerald-400 shadow-sm'
-                    : 'text-zinc-400'
-                }`}
-              >
-                Server & Join
-              </button>
+            {/* Unified 5-Button Control Dock: HUD & Chat, Anti-AFK, Server Join, Nether Calc, Settings */}
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-1.5 shadow-xl flex flex-wrap sm:flex-nowrap items-center justify-between gap-1.5">
+              {/* Left: View Switching Tabs with smooth Spring Indicator */}
+              <div className="flex items-center gap-1 w-full sm:w-auto flex-1 overflow-x-auto no-scrollbar py-0.5">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('all')}
+                  className={`hidden lg:flex items-center gap-1.5 py-2 px-3 rounded-xl font-bold text-xs transition-colors relative z-10 cursor-pointer whitespace-nowrap ${
+                    activeTab === 'all' ? 'text-white' : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  <LayoutGrid className="w-3.5 h-3.5 text-zinc-400" />
+                  <span>Overview</span>
+                  {activeTab === 'all' && (
+                    <motion.div
+                      layoutId="bot-view-tab-pill"
+                      className="absolute inset-0 bg-zinc-800 border border-zinc-700/60 rounded-xl -z-10 shadow-sm"
+                      transition={{ type: 'spring', bounce: 0.22, duration: 0.35 }}
+                    />
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('hud_chat')}
+                  className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl font-bold text-xs transition-colors relative z-10 cursor-pointer whitespace-nowrap ${
+                    activeTab === 'hud_chat' ? 'text-white' : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  <Terminal className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span>HUD & Chat</span>
+                  {activeTab === 'hud_chat' && (
+                    <motion.div
+                      layoutId="bot-view-tab-pill"
+                      className="absolute inset-0 bg-zinc-800 border border-emerald-500/40 rounded-xl -z-10 shadow-sm shadow-emerald-950/40"
+                      transition={{ type: 'spring', bounce: 0.22, duration: 0.35 }}
+                    />
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('anti_afk')}
+                  className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl font-bold text-xs transition-colors relative z-10 cursor-pointer whitespace-nowrap ${
+                    activeTab === 'anti_afk' ? 'text-white' : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>Anti-AFK</span>
+                  {activeTab === 'anti_afk' && (
+                    <motion.div
+                      layoutId="bot-view-tab-pill"
+                      className="absolute inset-0 bg-zinc-800 border border-amber-500/40 rounded-xl -z-10 shadow-sm shadow-amber-950/40"
+                      transition={{ type: 'spring', bounce: 0.22, duration: 0.35 }}
+                    />
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('settings')}
+                  className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl font-bold text-xs transition-colors relative z-10 cursor-pointer whitespace-nowrap ${
+                    activeTab === 'settings' ? 'text-white' : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  <Server className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                  <span>Server Join</span>
+                  {activeTab === 'settings' && (
+                    <motion.div
+                      layoutId="bot-view-tab-pill"
+                      className="absolute inset-0 bg-zinc-800 border border-sky-500/40 rounded-xl -z-10 shadow-sm shadow-sky-950/40"
+                      transition={{ type: 'spring', bounce: 0.22, duration: 0.35 }}
+                    />
+                  )}
+                </button>
+              </div>
+
+              {/* Subtle separator on sm: */}
+              <div className="hidden sm:block w-px h-6 bg-zinc-800 shrink-0 mx-1" />
+
+              {/* Right: The 2 Action Buttons brought down next to anti afk and server join */}
+              <div className="flex items-center gap-1.5 w-full sm:w-auto shrink-0 justify-end pt-1 sm:pt-0 border-t sm:border-t-0 border-zinc-800/80">
+                <motion.button
+                  id="btn-nether-calc-control"
+                  whileHover={{ scale: 1.05, y: -1 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setIsNetherCalcOpen(true)}
+                  className="flex-1 sm:flex-initial py-2 px-3 bg-purple-950/40 hover:bg-purple-900/60 text-purple-300 hover:text-purple-200 border border-purple-500/30 hover:border-purple-500/60 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap"
+                  title="Nether Portal Link Calculator"
+                >
+                  <Compass className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                  <span>Nether Calc</span>
+                </motion.button>
+
+                <motion.button
+                  id="btn-bot-settings-control"
+                  whileHover={{ scale: 1.05, y: -1 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setIsDefaultsOpen(true)}
+                  className="flex-1 sm:flex-initial py-2 px-3 bg-zinc-950 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-800 hover:border-zinc-700 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap"
+                  title="Bot Presets & Quick Messages"
+                >
+                  <Sliders className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span>Settings</span>
+                </motion.button>
+              </div>
             </div>
 
             {/* Active Bot Main Dashboard View */}
             {activeBot ? (
               <div className="space-y-6">
                 {/* Top Bot HUD */}
-                <div className={`${activeMobileTab === 'hud_chat' || 'hidden md:block'}`}>
-                  <BotHud
-                    bot={activeBot}
-                    onStart={handleStartBot}
-                    onStop={handleStopBot}
-                    onRestart={handleRestartBot}
-                    onEdit={(b) => {
-                      setEditingBot(b);
-                      setIsModalOpen(true);
-                    }}
-                    onDelete={handleDeleteBot}
-                    onToggleAntiAfk={handleToggleAntiAfk}
-                    isAdmin={Boolean(currentUser?.isAdmin)}
-                  />
-                </div>
+                <BotHud
+                  bot={activeBot}
+                  onStart={handleStartBot}
+                  onStop={handleStopBot}
+                  onRestart={handleRestartBot}
+                  onEdit={(b) => {
+                    setEditingBot(b);
+                    setIsModalOpen(true);
+                  }}
+                  onDelete={handleDeleteBot}
+                  onToggleAntiAfk={handleToggleAntiAfk}
+                  onOpenNetherCalc={() => setIsNetherCalcOpen(true)}
+                  isAdmin={Boolean(currentUser?.isAdmin)}
+                />
 
-                {/* Split Columns for Desktop */}
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                  {/* Left Column: Live Chat & Nearby Players (7 cols) */}
-                  <div
-                    className={`lg:col-span-7 space-y-6 ${
-                      activeMobileTab === 'hud_chat' ? 'block' : 'hidden md:block'
-                    }`}
-                  >
-                    <ChatConsole
-                      chatHistory={activeBot.chatHistory}
-                      botUsername={activeBot.config.username}
-                      isOnline={activeBot.status === 'online'}
-                      botStatus={activeBot.status}
-                      onSendMessage={handleSendMessage}
-                    />
+                {/* Animated Views based on activeTab */}
+                <AnimatePresence mode="wait">
+                  {activeTab === 'all' && (
+                    <motion.div
+                      key="view-all"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.22, ease: 'easeOut' }}
+                      className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start"
+                    >
+                      {/* Left Column: Live Chat & Nearby Players (7 cols) */}
+                      <div className="lg:col-span-7 space-y-6">
+                        <ChatConsole
+                          chatHistory={activeBot.chatHistory}
+                          botUsername={activeBot.config.username}
+                          isOnline={activeBot.status === 'online'}
+                          botStatus={activeBot.status}
+                          quickCommands={botDefaults.quickCommands}
+                          onSendMessage={handleSendMessage}
+                          onClearChat={handleClearChat}
+                          onOpenQuickMessagesSettings={() => setIsDefaultsOpen(true)}
+                        />
 
-                    <PlayersWidget
-                      players={activeBot.playersNearby}
-                      botUsername={activeBot.config.username}
-                    />
-                  </div>
+                        <PlayersWidget
+                          players={activeBot.playersNearby}
+                          botUsername={activeBot.config.username}
+                        />
+                      </div>
 
-                  {/* Right Column: Anti-AFK & Server Configuration (5 cols) */}
-                  <div
-                    className={`lg:col-span-5 space-y-6 ${
-                      activeMobileTab === 'anti_afk' || activeMobileTab === 'settings'
-                        ? 'block'
-                        : 'hidden md:block'
-                    }`}
-                  >
-                    {/* Anti AFK Settings */}
-                    <div className={`${activeMobileTab === 'settings' ? 'hidden md:block' : 'block'}`}>
+                      {/* Right Column: Anti-AFK & Server Configuration (5 cols) */}
+                      <div className="lg:col-span-5 space-y-6">
+                        <AntiAfkCard
+                          config={activeBot.config.antiAfk}
+                          isOnline={activeBot.status === 'online'}
+                          botId={activeBot.id}
+                          onUpdateConfig={(updated) => handleSaveBotConfig({ antiAfk: updated })}
+                          onTriggerTestMove={handleTriggerTestMove}
+                        />
+
+                        <ConnectionSettingsCard
+                          config={activeBot.config}
+                          isOnline={activeBot.status === 'online'}
+                          onSaveConfig={handleSaveBotConfig}
+                        />
+
+                        <div className="bg-zinc-900/50 border border-zinc-800/80 rounded-2xl p-4 text-xs space-y-2">
+                          <div className="flex items-center gap-2 font-bold text-zinc-300">
+                            <Info className="w-4 h-4 text-emerald-400" />
+                            <span>Ninimo 24/7 Private Hosting</span>
+                          </div>
+                          <p className="text-zinc-400 leading-relaxed text-[11px]">
+                            Ninimo runs your Mineflayer bot continuously in the background. The auto-reconnect engine automatically detects kicks, restarts, or timeouts and rejoins with your configured on-join login command. All changes are saved to your account.
+                          </p>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {activeTab === 'hud_chat' && (
+                    <motion.div
+                      key="view-hud-chat"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.22, ease: 'easeOut' }}
+                      className="space-y-6"
+                    >
+                      <ChatConsole
+                        chatHistory={activeBot.chatHistory}
+                        botUsername={activeBot.config.username}
+                        isOnline={activeBot.status === 'online'}
+                        botStatus={activeBot.status}
+                        quickCommands={botDefaults.quickCommands}
+                        onSendMessage={handleSendMessage}
+                        onClearChat={handleClearChat}
+                        onOpenQuickMessagesSettings={() => setIsDefaultsOpen(true)}
+                      />
+
+                      <PlayersWidget
+                        players={activeBot.playersNearby}
+                        botUsername={activeBot.config.username}
+                      />
+                    </motion.div>
+                  )}
+
+                  {activeTab === 'anti_afk' && (
+                    <motion.div
+                      key="view-anti-afk"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.22, ease: 'easeOut' }}
+                      className="space-y-6 max-w-3xl mx-auto"
+                    >
                       <AntiAfkCard
                         config={activeBot.config.antiAfk}
                         isOnline={activeBot.status === 'online'}
@@ -908,29 +1108,36 @@ export default function App() {
                         onUpdateConfig={(updated) => handleSaveBotConfig({ antiAfk: updated })}
                         onTriggerTestMove={handleTriggerTestMove}
                       />
-                    </div>
+                    </motion.div>
+                  )}
 
-                    {/* Connection & Join Automation Settings */}
-                    <div className={`${activeMobileTab === 'anti_afk' ? 'hidden md:block' : 'block'}`}>
+                  {activeTab === 'settings' && (
+                    <motion.div
+                      key="view-server-join"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.22, ease: 'easeOut' }}
+                      className="space-y-6 max-w-3xl mx-auto"
+                    >
                       <ConnectionSettingsCard
                         config={activeBot.config}
                         isOnline={activeBot.status === 'online'}
                         onSaveConfig={handleSaveBotConfig}
                       />
-                    </div>
 
-                    {/* 24/7 Hosting Information Card */}
-                    <div className="bg-zinc-900/50 border border-zinc-800/80 rounded-2xl p-4 text-xs space-y-2">
-                      <div className="flex items-center gap-2 font-bold text-zinc-300">
-                        <Info className="w-4 h-4 text-emerald-400" />
-                        <span>Ninimo 24/7 Private Hosting</span>
+                      <div className="bg-zinc-900/50 border border-zinc-800/80 rounded-2xl p-4 text-xs space-y-2">
+                        <div className="flex items-center gap-2 font-bold text-zinc-300">
+                          <Info className="w-4 h-4 text-emerald-400" />
+                          <span>Ninimo 24/7 Private Hosting</span>
+                        </div>
+                        <p className="text-zinc-400 leading-relaxed text-[11px]">
+                          Ninimo runs your Mineflayer bot continuously in the background. The auto-reconnect engine automatically detects kicks, restarts, or timeouts and rejoins with your configured on-join login command. All changes are saved to your account.
+                        </p>
                       </div>
-                      <p className="text-zinc-400 leading-relaxed text-[11px]">
-                        Ninimo runs your Mineflayer bot continuously in the background. The auto-reconnect engine automatically detects kicks, restarts, or timeouts and rejoins with your configured on-join login command. All changes are saved to your account.
-                      </p>
-                    </div>
-                  </div>
-                </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             ) : (
               <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-12 text-center space-y-4 shadow-xl">
@@ -962,6 +1169,30 @@ export default function App() {
             onClose={() => setIsModalOpen(false)}
             onSave={handleCreateOrUpdateModal}
             initialBot={editingBot}
+            userDefaults={botDefaults}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Nether Portal Calculator Tool Modal */}
+      <AnimatePresence>
+        {isNetherCalcOpen && (
+          <NetherPortalCalculator
+            isOpen={isNetherCalcOpen}
+            onClose={() => setIsNetherCalcOpen(false)}
+            activeBot={activeBot}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Bot Presets & Defaults Modal */}
+      <AnimatePresence>
+        {isDefaultsOpen && (
+          <BotDefaultsModal
+            isOpen={isDefaultsOpen}
+            onClose={() => setIsDefaultsOpen(false)}
+            currentDefaults={botDefaults}
+            onSaveDefaults={handleSaveDefaults}
           />
         )}
       </AnimatePresence>

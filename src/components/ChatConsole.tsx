@@ -8,16 +8,19 @@ import {
   Command,
   MessageSquare,
   ShieldAlert,
+  Sliders,
 } from 'lucide-react';
-import { ChatMessage } from '../types';
+import { ChatMessage, QuickCommandItem } from '../types';
 
 interface ChatConsoleProps {
   chatHistory: ChatMessage[];
   botUsername: string;
   isOnline: boolean;
   botStatus?: string;
+  quickCommands?: QuickCommandItem[];
   onSendMessage: (message: string) => Promise<boolean>;
   onClearChat?: () => void;
+  onOpenQuickMessagesSettings?: () => void;
 }
 
 export const ChatConsole: React.FC<ChatConsoleProps> = ({
@@ -25,8 +28,10 @@ export const ChatConsole: React.FC<ChatConsoleProps> = ({
   botUsername,
   isOnline,
   botStatus,
+  quickCommands,
   onSendMessage,
   onClearChat,
+  onOpenQuickMessagesSettings,
 }) => {
   const [inputText, setInputText] = useState('');
   const [filter, setFilter] = useState<'all' | 'chat' | 'system'>('all');
@@ -76,14 +81,16 @@ export const ChatConsole: React.FC<ChatConsoleProps> = ({
     return true;
   });
 
-  const quickCommands = [
-    { label: '/spawn', cmd: '/spawn' },
-    { label: '/home', cmd: '/home' },
-    { label: '/list', cmd: '/list' },
-    { label: '/help', cmd: '/help' },
-    { label: '/ping', cmd: '/ping' },
-    { label: 'Hello!', cmd: 'Hello everyone!' },
+  const defaultQuickCommands: QuickCommandItem[] = [
+    { id: '1', label: '/spawn', cmd: '/spawn' },
+    { id: '2', label: '/home', cmd: '/home' },
+    { id: '3', label: '/list', cmd: '/list' },
+    { id: '4', label: '/help', cmd: '/help' },
+    { id: '5', label: '/ping', cmd: '/ping' },
+    { id: '6', label: 'Hello!', cmd: 'Hello everyone!' },
   ];
+
+  const activeQuickCommands = quickCommands && quickCommands.length > 0 ? quickCommands : defaultQuickCommands;
 
   return (
     <div id="chat-console" className="bg-zinc-900 border border-zinc-800 rounded-2xl flex flex-col h-[520px] shadow-xl overflow-hidden">
@@ -113,26 +120,41 @@ export const ChatConsole: React.FC<ChatConsoleProps> = ({
           </div>
         </div>
 
-        {/* Filter buttons with layout pill */}
-        <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-xl p-1 text-[11px] relative">
-          {(['all', 'chat', 'system'] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setFilter(tab)}
-              className={`px-2.5 py-1 rounded-lg capitalize font-semibold transition-colors relative z-10 ${
-                filter === tab ? 'text-white' : 'text-zinc-400 hover:text-zinc-200'
-              }`}
+        {/* Filter buttons and Clear action */}
+        <div className="flex items-center gap-2">
+          <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-xl p-1 text-[11px] relative">
+            {(['all', 'chat', 'system'] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setFilter(tab)}
+                className={`px-2.5 py-1 rounded-lg capitalize font-semibold transition-colors relative z-10 ${
+                  filter === tab ? 'text-white' : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                {tab}
+                {filter === tab && (
+                  <motion.div
+                    layoutId="chat-filter-tab"
+                    className="absolute inset-0 bg-zinc-800 border border-zinc-700/60 rounded-lg -z-10"
+                    transition={{ type: 'spring', bounce: 0.2, duration: 0.4 }}
+                  />
+                )}
+              </button>
+            ))}
+          </div>
+
+          {onClearChat && (
+            <motion.button
+              whileHover={{ scale: 1.08 }}
+              whileTap={{ scale: 0.92 }}
+              onClick={onClearChat}
+              className="p-1.5 bg-zinc-900 hover:bg-rose-950/40 text-zinc-400 hover:text-rose-300 border border-zinc-800 hover:border-rose-500/40 rounded-xl text-xs transition-colors cursor-pointer"
+              title="Clear Console History"
+              aria-label="Clear Console"
             >
-              {tab}
-              {filter === tab && (
-                <motion.div
-                  layoutId="chat-filter-tab"
-                  className="absolute inset-0 bg-zinc-800 border border-zinc-700/60 rounded-lg -z-10"
-                  transition={{ type: 'spring', bounce: 0.2, duration: 0.4 }}
-                />
-              )}
-            </button>
-          ))}
+              <Trash2 className="w-3.5 h-3.5" />
+            </motion.button>
+          )}
         </div>
       </div>
 
@@ -155,7 +177,21 @@ export const ChatConsole: React.FC<ChatConsoleProps> = ({
               second: '2-digit',
             });
 
-            const isBotSelf = msg.type === 'bot_sent';
+            // Extract sender if encoded in raw string like <Player> message
+            let displaySender = msg.sender;
+            let displayText = msg.text;
+            if (!displaySender && (msg.type === 'chat' || msg.type === 'whisper')) {
+              const match = displayText.match(/^[<\[]([A-Za-z0-9_]{3,16})[>\]]\s*(.*)$/);
+              if (match) {
+                displaySender = match[1];
+                displayText = match[2];
+              }
+            }
+
+            const isBotSelf =
+              msg.type === 'bot_sent' ||
+              (displaySender && displaySender.toLowerCase() === botUsername.toLowerCase());
+            const isOtherPlayer = (msg.type === 'chat' || msg.type === 'whisper') && !isBotSelf;
             const isSystem = msg.type === 'system' || msg.type === 'info';
             const isError = msg.type === 'error';
 
@@ -165,9 +201,11 @@ export const ChatConsole: React.FC<ChatConsoleProps> = ({
                 initial={{ opacity: 0, x: -6 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.15 }}
-                className={`py-0.5 px-2 rounded flex items-start gap-2 hover:bg-zinc-800/40 transition-colors ${
+                className={`py-1 px-2.5 rounded-lg flex items-start gap-2 hover:bg-zinc-800/40 transition-colors ${
                   isBotSelf
-                    ? 'bg-emerald-950/20 border-l-2 border-emerald-500'
+                    ? 'bg-sky-950/20 border-l-2 border-sky-400'
+                    : isOtherPlayer
+                    ? 'bg-emerald-950/25 border-l-2 border-emerald-500'
                     : isError
                     ? 'bg-rose-950/20 border-l-2 border-rose-500 text-rose-300'
                     : isSystem
@@ -176,30 +214,42 @@ export const ChatConsole: React.FC<ChatConsoleProps> = ({
                 }`}
               >
                 {/* Timestamp */}
-                <span className="text-[10px] text-zinc-500 shrink-0 select-none mt-0.5">
+                <span className="text-[10px] text-zinc-500 shrink-0 select-none mt-0.5 font-mono">
                   [{timeStr}]
                 </span>
 
                 {/* Sender badge if chat */}
                 {isBotSelf ? (
-                  <span className="text-emerald-400 font-bold shrink-0">
+                  <span className="text-sky-400 font-bold shrink-0 flex items-center gap-1 font-mono">
                     &lt;{botUsername}&gt;
                   </span>
-                ) : msg.sender ? (
-                  <span className="text-amber-300 font-bold shrink-0">
-                    &lt;{msg.sender}&gt;
+                ) : isOtherPlayer ? (
+                  <span className="text-emerald-400 font-bold shrink-0 font-mono">
+                    &lt;{displaySender || 'Player'}&gt;
+                  </span>
+                ) : displaySender ? (
+                  <span className="text-amber-300 font-bold shrink-0 font-mono">
+                    [{displaySender}]
                   </span>
                 ) : null}
 
                 {/* Content */}
-                <div className="flex-1 text-zinc-300 break-words leading-relaxed">
-                  {msg.formattedHtml ? (
+                <div
+                  className={`flex-1 break-words leading-relaxed font-mono ${
+                    isBotSelf
+                      ? 'text-zinc-100'
+                      : isOtherPlayer
+                      ? 'text-emerald-300'
+                      : 'text-zinc-300'
+                  }`}
+                >
+                  {msg.formattedHtml && !isOtherPlayer && !isBotSelf ? (
                     <div
                       dangerouslySetInnerHTML={{ __html: msg.formattedHtml }}
                       className="inline"
                     />
                   ) : (
-                    <span>{msg.text}</span>
+                    <span>{displayText}</span>
                   )}
                 </div>
               </motion.div>
@@ -214,18 +264,31 @@ export const ChatConsole: React.FC<ChatConsoleProps> = ({
           <Command className="w-3 h-3 text-zinc-400" />
           Quick:
         </span>
-        {quickCommands.map((q) => (
+        {activeQuickCommands.map((q) => (
           <motion.button
-            key={q.cmd}
-            whileHover={{ scale: 1.06, y: -1 }}
-            whileTap={{ scale: 0.94 }}
+            key={q.id || q.cmd}
+            whileHover={{ scale: 1.05, y: -1 }}
+            whileTap={{ scale: 0.95 }}
             onClick={() => sendQuickCommand(q.cmd)}
             disabled={!canSend}
-            className="shrink-0 px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 disabled:opacity-40 disabled:hover:bg-zinc-900 text-zinc-300 hover:text-white border border-zinc-800 text-[11px] font-mono font-medium transition-colors cursor-pointer"
+            className="shrink-0 px-3 py-1 rounded-full bg-zinc-900 hover:bg-zinc-800 disabled:opacity-40 disabled:hover:bg-zinc-900 text-zinc-300 hover:text-white border border-zinc-800 hover:border-zinc-700 text-[11px] font-mono font-medium transition-colors cursor-pointer whitespace-nowrap shadow-sm"
           >
             {q.label}
           </motion.button>
         ))}
+
+        {onOpenQuickMessagesSettings && (
+          <motion.button
+            whileHover={{ scale: 1.12, rotate: 45 }}
+            whileTap={{ scale: 0.92 }}
+            type="button"
+            onClick={onOpenQuickMessagesSettings}
+            className="shrink-0 p-1 text-zinc-500 hover:text-sky-300 hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer ml-auto"
+            title="Customize Quick Messages in Settings"
+          >
+            <Sliders className="w-3 h-3" />
+          </motion.button>
+        )}
       </div>
 
       {/* Chat Input Bar with motion button */}
