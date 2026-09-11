@@ -19,6 +19,7 @@
     "@vitejs/plugin-react": "^5.0.4",
     "autoprefixer": "^10.4.21",
     "canvas": "^3.2.3",
+    "cloudflared": "^0.7.3",
     "dotenv": "^17.2.3",
     "esbuild": "^0.25.0",
     "express": "^4.21.2",

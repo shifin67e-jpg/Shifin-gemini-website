@@ -12,6 +12,7 @@
         "@vitejs/plugin-react": "^5.0.4",
         "autoprefixer": "^10.4.21",
         "canvas": "^3.2.3",
+        "cloudflared": "^0.7.3",
         "dotenv": "^17.2.3",
         "esbuild": "^0.25.0",
         "express": "^4.21.2",
@@ -348,6 +349,8 @@
     "chownr": ["chownr@1.1.4", "", {}, "sha512-jJ0bqzaylmJtVnNgzTeSOs8DPavpbYgEr/b0YL8/2GO3xJEhInFmhKMUnEJQjZumK7KXGFhUy89PrsJWlakBVg=="],
 
     "cliui": ["cliui@7.0.4", "", { "dependencies": { "string-width": "^4.2.0", "strip-ansi": "^6.0.0", "wrap-ansi": "^7.0.0" } }, "sha512-OcRE68cOsVMXp1Yvonl/fzkQOyjLSu/8bhPDfQt0e0/Eb283TKP20Fs2MqoPsr9SwA595rRCA+QMzYc9nBP+JQ=="],
+
+    "cloudflared": ["cloudflared@0.7.3", "", { "bin": { "cloudflared": "./lib/cloudflared.js" } }, "sha512-dR4QMS4PbD287QqOV/vAoE1BcQCXphLOVrN9vjNUgkLrPDA5qxn9Dz0VId0P7/Czj4Mxu3hoLgbrVx5OtOWr5Q=="],
 
     "color-convert": ["color-convert@2.0.1", "", { "dependencies": { "color-name": "~1.1.4" } }, "sha512-RRECPsj7iu/xb5oKYcsFHSppFNnsj/52OVTRKb4zP5onXwVF3zVmmToNcOfGC+CRDpfK/U584fMg38ZHCaElKQ=="],
 
