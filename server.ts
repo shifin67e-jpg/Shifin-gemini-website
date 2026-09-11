@@ -6,7 +6,6 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import { botManager } from './server/botManager.js';
 import { authManager } from './server/auth.js';
-import { setupBotViewer } from './server/botViewer.js';
 
 // Lazy Gemini client initialization
 let geminiClient: GoogleGenAI | null = null;
@@ -123,9 +122,6 @@ process.on('unhandledRejection', (reason) => {
 async function startServer() {
   const app = express();
   const server = http.createServer(app);
-
-  // Initialize Prismarine 3D Bot Perspective Viewer
-  setupBotViewer(app, server, botManager);
 
   // Port resolution: AI Studio sandbox routes strictly to port 3000 via internal proxy.
   // On Railway or standard production hosts, listen dynamically on the assigned process.env.PORT.
